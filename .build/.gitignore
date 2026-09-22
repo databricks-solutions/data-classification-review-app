@@ -1,0 +1,5 @@
+*
+!.gitignore
+!*.whl
+!app.yml
+!requirements.txt

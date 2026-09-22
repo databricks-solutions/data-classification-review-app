@@ -1,0 +1,146 @@
+bundle:
+  name: data-classification-review
+
+sync:
+  include:
+    - .build
+    - demo
+
+variables:
+  # Update to match your workspace's SQL warehouse name, or override per target below.
+  warehouse_id:
+    lookup:
+      warehouse: "Shared endpoint"
+  # Lakebase branch: projects/<project-id>/branches/<branch-id>
+  # Create the Lakebase project first, then set this variable.
+  lakebase_branch:
+    default: ""
+  # Lakebase database full path: projects/<project-id>/branches/<branch-id>/databases/<database-id>
+  lakebase_database:
+    default: ""
+  # Lakebase endpoint host (from the branch's primary endpoint status.hosts.host).
+  lakebase_host:
+    default: ""
+  # Lakebase endpoint name for token generation: projects/<project-id>/branches/<branch-id>/endpoints/<endpoint-id>
+  lakebase_endpoint_name:
+    default: ""
+  admin_emails:
+    default: ""
+  classification_results_table:
+    default: "system.data_classification.results"
+
+resources:
+  jobs:
+    data-classification-review-demo:
+      name: "data-classification-review-demo"
+      parameters:
+        - name: demo_mode
+          default: "mock_results"
+        - name: target_catalog
+          default: ""
+        - name: enable_dc
+          default: "true"
+        - name: results_table
+          default: ""
+      tasks:
+        - task_key: route_is_mock
+          condition_task:
+            op: "EQUAL_TO"
+            left: "{{job.parameters.demo_mode}}"
+            right: "mock_results"
+        - task_key: mock_classification_results
+          depends_on:
+            - task_key: route_is_mock
+              outcome: "true"
+          notebook_task:
+            notebook_path: ${workspace.file_path}/demo/notebooks/03_mock_classification_results
+            base_parameters:
+              results_table: "{{job.parameters.results_table}}"
+        - task_key: route_is_single_catalog
+          depends_on:
+            - task_key: route_is_mock
+              outcome: "false"
+          condition_task:
+            op: "EQUAL_TO"
+            left: "{{job.parameters.demo_mode}}"
+            right: "single_catalog"
+        - task_key: create_demo_single_catalog
+          depends_on:
+            - task_key: route_is_single_catalog
+              outcome: "true"
+          notebook_task:
+            notebook_path: ${workspace.file_path}/demo/notebooks/02_create_demo_single_catalog
+            base_parameters:
+              target_catalog: "{{job.parameters.target_catalog}}"
+              enable_dc: "{{job.parameters.enable_dc}}"
+        - task_key: create_demo_multiple_catalogs
+          depends_on:
+            - task_key: route_is_single_catalog
+              outcome: "false"
+          notebook_task:
+            notebook_path: ${workspace.file_path}/demo/notebooks/01_create_demo_multiple_catalogs
+            base_parameters:
+              enable_dc: "{{job.parameters.enable_dc}}"
+
+  apps:
+    data-classification-review-app:
+      name: "data-classification-review-app"
+      description: "data-classification-review created with apx"
+      source_code_path: ./.build
+      user_api_scopes:
+        - sql
+        - catalog.catalogs:read
+        - catalog.schemas:read
+        - catalog.tables:read
+      permissions:
+        - group_name: users
+          level: CAN_USE
+      resources:
+        - name: warehouse
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: "CAN_USE"
+        - name: lakebase
+          postgres:
+            branch: ${var.lakebase_branch}
+            database: ${var.lakebase_database}
+            permission: "CAN_CONNECT_AND_CREATE"
+      config:
+        env:
+          - name: USE_MOCK_DATA
+            value: "false"
+          - name: CLASSIFICATION_RESULTS_TABLE
+            value: ${var.classification_results_table}
+          - name: WAREHOUSE_ID
+            value: ${var.warehouse_id}
+          - name: LAKEBASE_HOST
+            value: ${var.lakebase_host}
+          - name: LAKEBASE_ENDPOINT_NAME
+            value: ${var.lakebase_endpoint_name}
+          - name: ADMIN_EMAILS
+            value: ${var.admin_emails}
+
+targets:
+  dev:
+    mode: development
+    default: true
+
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    # Deployment-specific infrastructure values (warehouse name, Lakebase project/branch/
+    # endpoint/host) are environment-specific and must NOT be committed. Set them in the
+    # git-ignored databricks.local.yml, which overrides `targets.prod.variables`.
+    # See databricks.local.yml.example for the required shape.
+    variables:
+      warehouse_id:
+        lookup:
+          warehouse: "Shared endpoint"
+      lakebase_branch: ""
+      lakebase_database: ""
+      lakebase_host: ""
+      lakebase_endpoint_name: ""
+
+include:
+  - databricks.local.yml

@@ -1,0 +1,46 @@
+[project]
+name = "data-classification-review-app"
+version = "1.0.2"
+description = "Data Classification Review App"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.119.0",
+    "pydantic-settings>=2.11.0",
+    "uvicorn>=0.37.0",
+    "databricks-sdk>=0.81.0",
+    "psycopg2-binary>=2.9.12",
+    "httpx>=0.28.1",
+    "python-dotenv>=1.2.2",
+    "python-multipart>=0.0.28",
+]
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.12",
+    "pytest>=8.0.0",
+    "pytest-mock>=3.14.0",
+]
+
+[tool.ty.src]
+exclude = ["demo/**"]
+
+[tool.apx.metadata]
+app-name = "data-classification-review-app"
+app-slug = "data_classification_review_app"
+app-entrypoint = "data_classification_review_app.backend.app:app"
+api-prefix = "/api"
+metadata-path = "src/data_classification_review_app/_metadata.py"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.hooks.version]
+path = "src/data_classification_review_app/_version.py"
+template = '''
+version = "{version}"
+'''
+
+[tool.hatch.build]
+artifacts = ["src/data_classification_review_app/__dist__", "src/data_classification_review_app/_metadata.py"]

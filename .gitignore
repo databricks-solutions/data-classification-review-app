@@ -1,5 +1,54 @@
-*conf*.json
-.DS_Store
-__pycache__
-.idea/
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# pytest cache
+.pytest_cache/
+
+# version file
+src/data_classification_review_app/_version.py
+
+# metadata file
+src/data_classification_review_app/_metadata.py
+
+# build files
+dist
+
+# js-related
+node_modules/
+.tanstack
+
+# env files
 .env
+.env.local
+.env.*
+
+# mac
+.DS_Store
+
+# design handoff (reference only, not production code)
+design_handoff_data_classification_review/
+
+# DABs 
+.databricks
+
+# apx
+.apx/
+
+# UI dist folder
+src/data_classification_review_app/__dist__/
+
+# stray generated API client (codegen run from the wrong working directory)
+src/data_classification_review_app/ui/
+
+# local deployment configuration — holds environment-specific / internal infrastructure
+# identifiers (warehouse name, Lakebase project/branch/endpoint/host). Never commit it;
+# use databricks.local.yml.example as the committed template.
+databricks.local.yml

@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS tag_config (
+  tag_key    TEXT PRIMARY KEY,
+  enabled    BOOLEAN NOT NULL DEFAULT TRUE,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);

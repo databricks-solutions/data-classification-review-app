@@ -1,0 +1,19 @@
+# Template for databricks.local.yml — copy this file to `databricks.local.yml` and fill in
+# your environment's values. `databricks.local.yml` is git-ignored so that deployment-specific
+# infrastructure identifiers (internal warehouse name, Lakebase project/branch/endpoint/host)
+# are never committed. This template is safe to commit because it contains only placeholders.
+#
+#   cp databricks.local.yml.example databricks.local.yml
+#
+# databricks.yml `include`s databricks.local.yml, so the block below overrides the empty
+# placeholders in the committed `targets.prod.variables`.
+targets:
+  prod:
+    variables:
+      warehouse_id:
+        lookup:
+          warehouse: "<your-sql-warehouse-name>"
+      lakebase_branch: "projects/<project-id>/branches/<branch-id>"
+      lakebase_database: "projects/<project-id>/branches/<branch-id>/databases/<database-id>"
+      lakebase_host: "ep-xxx.database.<region>.azuredatabricks.net"
+      lakebase_endpoint_name: "projects/<project-id>/branches/<branch-id>/endpoints/<endpoint-id>"

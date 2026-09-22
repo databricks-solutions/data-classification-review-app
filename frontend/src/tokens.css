@@ -1,0 +1,352 @@
+/* ============================================================
+   Databricks Design System — Colors & Type
+   ============================================================ */
+
+/* ---------- Fonts ---------- */
+@font-face {
+  font-family: "DM Sans";
+  src: url("/fonts/dm-sans-regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "DM Sans";
+  src: url("/fonts/dm-sans-medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "DM Sans";
+  src: url("/fonts/dm-sans-bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "DM Sans";
+  src: url("/fonts/dm-sans-italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "DM Sans";
+  src: url("/fonts/dm-sans-medium-italic.ttf") format("truetype");
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "DM Sans";
+  src: url("/fonts/dm-sans-bold-italic.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "DM Mono";
+  src: url("/fonts/dm-mono-light.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "DM Mono";
+  src: url("/fonts/dm-mono-regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "DM Mono";
+  src: url("/fonts/dm-mono-italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "DM Mono";
+  src: url("/fonts/dm-mono-medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ============================================================
+   Tokens
+   ============================================================ */
+:root {
+  /* ---------- Brand primaries ---------- */
+  --db-lava-600:  #FF3621;   /* primary — hot pop */
+  --db-navy-800:  #1B3139;   /* primary — deep ground */
+  --db-oat-medium:#EEEDE9;
+  --db-oat-light: #F9F7F4;
+  --db-white:     #FFFFFF;
+
+  /* ---------- Lava (red-orange) ---------- */
+  --db-lava-800: #801C17;
+  --db-lava-700: #BD2B26;
+  --db-lava-500: #FF5F46;
+  --db-lava-400: #FF9E94;
+  --db-lava-300: #FABFBA;
+
+  /* ---------- Maroon ---------- */
+  --db-maroon-800: #4A121A;
+  --db-maroon-700: #730D21;
+  --db-maroon-600: #98102A;
+  --db-maroon-500: #AB4057;
+  --db-maroon-400: #BF7080;
+  --db-maroon-300: #D69EA8;
+
+  /* ---------- Yellow ---------- */
+  --db-yellow-800: #7D5319;
+  --db-yellow-700: #BA7B23;
+  --db-yellow-600: #FFAB00;
+  --db-yellow-500: #FCBA33;
+  --db-yellow-400: #FFCC66;
+  --db-yellow-300: #FFDB96;
+
+  /* ---------- Green ---------- */
+  --db-green-800: #095A35;
+  --db-green-700: #00875C;
+  --db-green-600: #00A972;
+  --db-green-500: #42BA91;
+  --db-green-400: #70C4AB;
+  --db-green-300: #9ED6C4;
+
+  /* ---------- Blue ---------- */
+  --db-blue-800: #04355D;
+  --db-blue-700: #0E538B;
+  --db-blue-600: #2272B4;
+  --db-blue-500: #4299E0;
+  --db-blue-400: #8ACAFF;
+  --db-blue-300: #BAE1FC;
+
+  /* ---------- Navy ---------- */
+  --db-navy-900: #0B2026;
+  --db-navy-700: #143D4A;
+  --db-navy-600: #1B5162;
+  --db-navy-500: #618794;
+  --db-navy-400: #90A5B1;
+  --db-navy-300: #C4CCD6;
+
+  /* ---------- Functional grays ---------- */
+  --db-gray-nav:   #303F47;
+  --db-gray-text:  #5A6F77;
+  --db-gray-lines: #DCE0E2;
+
+  /* ---------- Semantic surface ---------- */
+  --bg:            var(--db-oat-light);
+  --bg-canvas:     var(--db-white);
+  --bg-subtle:     var(--db-oat-medium);
+  --bg-inverse:    var(--db-navy-800);
+  --bg-inverse-deep: var(--db-navy-900);
+
+  /* ---------- Semantic foreground ---------- */
+  --fg-1:          var(--db-navy-800);     /* default body */
+  --fg-2:          var(--db-gray-text);    /* secondary */
+  --fg-3:          var(--db-navy-400);     /* tertiary / placeholder */
+  --fg-on-dark:    var(--db-white);
+  --fg-on-dark-2:  var(--db-navy-300);
+  --fg-accent:     var(--db-lava-600);
+  --fg-link:       var(--db-lava-700);
+
+  /* ---------- Semantic borders ---------- */
+  --border:        var(--db-gray-lines);
+  --border-strong: var(--db-navy-300);
+  --border-dark:   var(--db-navy-700);
+
+  /* ---------- Semantic status ---------- */
+  --success:       var(--db-green-700);
+  --success-bg:    var(--db-green-300);
+  --warning:       var(--db-yellow-700);
+  --warning-bg:    var(--db-yellow-300);
+  --danger:        var(--db-lava-700);
+  --danger-bg:     var(--db-lava-300);
+  --info:          var(--db-blue-700);
+  --info-bg:       var(--db-blue-300);
+
+  /* ---------- Type families ---------- */
+  --font-sans: "DM Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: "DM Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-display: "DM Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* ---------- Type scale (used by semantic vars) ---------- */
+  --fs-display-xl: 96px;
+  --fs-display-lg: 72px;
+  --fs-display-md: 56px;
+  --fs-h1:         44px;
+  --fs-h2:         32px;
+  --fs-h3:         24px;
+  --fs-h4:         20px;
+  --fs-body-lg:    18px;
+  --fs-body:       16px;
+  --fs-body-sm:    14px;
+  --fs-caption:    12px;
+  --fs-eyebrow:    13px;
+
+  --lh-tight:   1.05;
+  --lh-snug:    1.2;
+  --lh-normal:  1.45;
+  --lh-relaxed: 1.6;
+
+  --tracking-tight:  -0.02em;
+  --tracking-normal: 0;
+  --tracking-eyebrow: 0.08em;
+
+  /* ---------- Spacing (4px base) ---------- */
+  --space-0:  0;
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  24px;
+  --space-6:  32px;
+  --space-7:  48px;
+  --space-8:  64px;
+  --space-9:  96px;
+  --space-10: 128px;
+
+  /* ---------- Radii ---------- */
+  --radius-none: 0;
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 12px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* ---------- Shadows ---------- */
+  --shadow-xs:  0 1px 2px rgba(11,32,38,0.06);
+  --shadow-sm:  0 1px 3px rgba(11,32,38,0.08), 0 1px 2px rgba(11,32,38,0.04);
+  --shadow-md:  0 4px 12px rgba(11,32,38,0.08), 0 1px 3px rgba(11,32,38,0.06);
+  --shadow-lg:  0 12px 32px rgba(11,32,38,0.12), 0 2px 6px rgba(11,32,38,0.06);
+  --shadow-xl:  0 24px 64px rgba(11,32,38,0.18);
+  --shadow-focus: 0 0 0 3px rgba(255, 54, 33, 0.28);
+
+  /* ---------- Motion ---------- */
+  --ease-out:    cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.5, 0, 0.2, 1);
+  --dur-fast:   120ms;
+  --dur-base:   200ms;
+  --dur-slow:   320ms;
+}
+
+/* ============================================================
+   Element defaults — semantic
+   ============================================================ */
+html, body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-normal);
+  color: var(--fg-1);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, .h1, .db-h1 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h1);
+  font-weight: 500;
+  line-height: var(--lh-tight);
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg-1);
+  margin: 0;
+}
+h2, .h2, .db-h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h2);
+  font-weight: 500;
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg-1);
+  margin: 0;
+}
+h3, .h3, .db-h3 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h3);
+  font-weight: 500;
+  line-height: var(--lh-snug);
+  color: var(--fg-1);
+  margin: 0;
+}
+h4, .h4, .db-h4 {
+  font-family: var(--font-display);
+  font-size: var(--fs-h4);
+  font-weight: 500;
+  line-height: var(--lh-snug);
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg-1);
+  margin: 0;
+}
+.db-display-xl { font-size: var(--fs-display-xl); font-weight: 500; line-height: 0.95; letter-spacing: -0.03em; }
+.db-display-lg { font-size: var(--fs-display-lg); font-weight: 500; line-height: var(--lh-tight); letter-spacing: -0.025em; }
+.db-display-md { font-size: var(--fs-display-md); font-weight: 500; line-height: var(--lh-tight); letter-spacing: -0.02em; }
+
+p, .db-p {
+  font-size: var(--fs-body);
+  line-height: var(--lh-relaxed);
+  color: var(--fg-1);
+  margin: 0;
+  text-wrap: pretty;
+}
+.db-body-lg { font-size: var(--fs-body-lg); line-height: var(--lh-relaxed); }
+.db-body-sm { font-size: var(--fs-body-sm); line-height: var(--lh-normal); color: var(--fg-2); }
+.db-caption  { font-size: var(--fs-caption); line-height: var(--lh-normal); color: var(--fg-2); }
+.db-eyebrow  {
+  font-size: var(--fs-eyebrow);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-eyebrow);
+  color: var(--fg-2);
+}
+
+code, .db-code, kbd, samp {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--db-oat-medium);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--db-navy-800);
+}
+pre {
+  font-family: var(--font-mono);
+  font-size: var(--fs-body-sm);
+  line-height: var(--lh-normal);
+  background: var(--db-navy-900);
+  color: var(--db-oat-light);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  overflow: auto;
+}
+pre code { background: transparent; padding: 0; color: inherit; }
+
+a, .db-link {
+  color: var(--fg-link);
+  text-decoration: none;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+a:hover, .db-link:hover { color: var(--db-lava-600); text-decoration: underline; text-underline-offset: 3px; }
+
+hr { border: 0; border-top: 1px solid var(--border); margin: var(--space-6) 0; }
+
+/* Selection */
+::selection { background: var(--db-lava-600); color: var(--db-white); }
+
+/* ============================================================
+   Global reset
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; }
+button { font-family: var(--font-sans); }
+input, textarea, select { font-family: var(--font-sans); }
+
+/* ============================================================
+   Animations
+   ============================================================ */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

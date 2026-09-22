@@ -1,0 +1,1 @@
+ALTER TABLE decisions ADD COLUMN IF NOT EXISTS class_tag TEXT;

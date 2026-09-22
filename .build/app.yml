@@ -1,0 +1,10 @@
+name: data-classification-review-app
+description: "Steward review UI for Unity Catalog data classification proposals"
+
+command: ["uvicorn", "data_classification_review_app.backend.app:app", "--workers", "1"]
+
+user_api_scopes:
+  - sql
+  - catalog.catalogs:read
+  - catalog.schemas:read
+  - catalog.tables:read
