@@ -15,5 +15,6 @@ targets:
           warehouse: "<your-sql-warehouse-name>"
       lakebase_branch: "projects/<project-id>/branches/<branch-id>"
       lakebase_database: "projects/<project-id>/branches/<branch-id>/databases/<database-id>"
+      lakebase_database_name: "<postgres-database-name>"
       lakebase_host: "ep-xxx.database.<region>.azuredatabricks.net"
       lakebase_endpoint_name: "projects/<project-id>/branches/<branch-id>/endpoints/<endpoint-id>"

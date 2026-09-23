@@ -22,6 +22,7 @@ CATALOG_FILTER=""
 ADMIN_EMAILS=""
 LAKEBASE_BRANCH=""
 LAKEBASE_DATABASE=""
+LAKEBASE_DATABASE_NAME=""
 LAKEBASE_HOST=""
 LAKEBASE_ENDPOINT_NAME=""
 SP_ID=""
@@ -418,6 +419,15 @@ setup_lakebase() {
 write_local_files() {
   print_step "Writing local configuration"
 
+  # The app connects with the Postgres database name, which is not always the last segment of the
+  # resource path: the default database has resource id "databricks-postgres" and Postgres name
+  # "databricks_postgres".
+  LAKEBASE_DATABASE_NAME=$(databricks postgres get-database "$LAKEBASE_DATABASE" \
+    --output json "${CLI[@]}" 2>/dev/null \
+    | grep '"postgres_database"' | head -1 | cut -d'"' -f4 || true)
+  [[ -n "$LAKEBASE_DATABASE_NAME" ]] || die "Could not resolve the Postgres database name for $LAKEBASE_DATABASE"
+  print_ok "Postgres database: $LAKEBASE_DATABASE_NAME"
+
   local catalog_filter_block=""
   if [[ -n "$CATALOG_FILTER" ]]; then
     catalog_filter_block="    resources:
@@ -444,6 +454,7 @@ targets:
           warehouse: "${WAREHOUSE_NAME}"
       lakebase_branch: "${LAKEBASE_BRANCH}"
       lakebase_database: "${LAKEBASE_DATABASE}"
+      lakebase_database_name: "${LAKEBASE_DATABASE_NAME}"
       lakebase_host: "${LAKEBASE_HOST}"
       lakebase_endpoint_name: "${LAKEBASE_ENDPOINT_NAME}"
       admin_emails: "${ADMIN_EMAILS}"

@@ -18,6 +18,10 @@ variables:
   # Lakebase database full path: projects/<project-id>/branches/<branch-id>/databases/<database-id>
   lakebase_database:
     default: ""
+  # Postgres database name the app connects to. Not always the last segment of lakebase_database:
+  # the default database has resource id "databricks-postgres" and Postgres name "databricks_postgres".
+  lakebase_database_name:
+    default: ""
   # Lakebase endpoint host (from the branch's primary endpoint status.hosts.host).
   lakebase_host:
     default: ""
@@ -113,6 +117,8 @@ resources:
             value: ${var.classification_results_table}
           - name: WAREHOUSE_ID
             value: ${var.warehouse_id}
+          - name: LAKEBASE_DATABASE
+            value: ${var.lakebase_database_name}
           - name: LAKEBASE_HOST
             value: ${var.lakebase_host}
           - name: LAKEBASE_ENDPOINT_NAME
@@ -139,6 +145,7 @@ targets:
           warehouse: "Shared endpoint"
       lakebase_branch: ""
       lakebase_database: ""
+      lakebase_database_name: ""
       lakebase_host: ""
       lakebase_endpoint_name: ""
 
