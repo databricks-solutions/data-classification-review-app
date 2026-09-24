@@ -33,6 +33,17 @@ def _dedupe_latest(rows: list[dict]) -> list[dict]:
     return list(latest.values())
 
 
+def _decision_for(decisions: dict[tuple, dict], column_key: str, class_tag: str | None) -> dict:
+    """Return the latest decision recorded against one (column, class tag).
+
+    A column can carry several detected classes, each judged separately, so a verdict
+    must not leak onto the column's other tags. Decisions written before `class_tag`
+    was recorded have none, and predate per-tag verdicts, so they cover every tag on
+    the column.
+    """
+    return decisions.get((column_key, class_tag)) or decisions.get((column_key, None)) or {}
+
+
 def _owner_for(steward_rows: list[dict], catalog: str, schema: str, table: str) -> str:
     """Return the most-specific assigned steward: table > schema > catalog."""
     table_match = schema_match = catalog_match = None
@@ -81,10 +92,10 @@ def _get_proposals() -> list[dict]:
     rows = _dedupe_latest(rows)
 
     decisions = {
-        r["column_key"]: r
+        (r["column_key"], r.get("class_tag")): r
         for r in db_query(
-            "SELECT DISTINCT ON (column_key) * FROM decisions "
-            "WHERE user_added = false ORDER BY column_key, decided_at DESC"
+            "SELECT DISTINCT ON (column_key, class_tag) * FROM decisions "
+            "WHERE user_added = false ORDER BY column_key, class_tag, decided_at DESC"
         )
     }
     steward_rows = db_query("SELECT * FROM steward_assignments")
@@ -92,7 +103,7 @@ def _get_proposals() -> list[dict]:
     result = []
     for r in rows:
         key = f"{r['catalog_name']}.{r['schema_name']}.{r['table_name']}.{r['column_name']}"
-        d = decisions.get(key, {})
+        d = _decision_for(decisions, key, r["class_tag"])
         result.append({
             "key": key,
             "catalog": r["catalog_name"],
