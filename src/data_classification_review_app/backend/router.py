@@ -11,6 +11,7 @@ from .routes.decisions import router as decisions_router
 from .routes.apply_tags import router as apply_tags_router
 from .routes.stewards import router as stewards_router
 from .routes.tags import router as tags_router
+from .routes.classification_sync import router as classification_sync_router
 
 router = create_router()
 
@@ -33,3 +34,4 @@ router.include_router(decisions_router)
 router.include_router(apply_tags_router)
 router.include_router(stewards_router)
 router.include_router(tags_router)
+router.include_router(classification_sync_router)

@@ -17,3 +17,10 @@ targets:
       lakebase_database: "projects/<project-id>/branches/<branch-id>/databases/<database-id>"
       lakebase_host: "ep-xxx.database.<region>.azuredatabricks.net"
       lakebase_endpoint_name: "projects/<project-id>/branches/<branch-id>/endpoints/<endpoint-id>"
+      # Classification synced-table variables (synced_uc_name, synced_pg_name,
+      # sync_pipeline_id, sync_cron) are NOT set here — scripts/deploy.sh
+      # provisions the view + synced table and passes them to `bundle deploy`
+      # via --var. Override the source names only through the deploy.sh flags:
+      #   --classification-catalog / --classification-schema
+      #   --classification-view    / --synced-table
+      #   --sync-interval-hours    (24 → daily sync-job cron)

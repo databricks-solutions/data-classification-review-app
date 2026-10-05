@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { Icon, Pill, TagPill, Btn, Avatar, FilterChip } from '../components'
 import { api } from '../store/api'
-import type { Proposal, Principal, ClassificationStatus } from '../store/types'
+import type { Principal, ProvisioningStatus } from '../store/types'
 
 function KpiTile({ label, value, sub, valueColor }: {
   label: string; value: string | number; sub?: string; valueColor?: string
@@ -35,109 +35,117 @@ function KpiTile({ label, value, sub, valueColor }: {
   )
 }
 
-interface CatalogRow {
-  catalog: string
-  tables: Set<string>
-  total: number
-  pending: number
-  approved: number
-  rejected: number
-  modified: number
-  applied: number
+
+const SETUP_STEP_LABEL: Record<NonNullable<ProvisioningStatus['step']>, string> = {
+  view: 'Creating the classification view',
+  synced_table: 'Creating the Lakebase synced table',
+  pipeline: 'Waiting for the synced-table pipeline',
+  job: 'Creating the sync job',
 }
 
-interface TagRow {
-  tag: string
-  total: number
-  approved: number
-  pending: number
-  rejected: number
-  modified: number
-  applied: number
+/** Classification setup (the app SP's startup provisioning) isn't ready yet. */
+function isSetupIncomplete(p: ProvisioningStatus | undefined): p is ProvisioningStatus {
+  return !!p && p.state !== 'ready' && p.state !== 'disabled'
+}
+
+function SetupBanner({ status, onRetry, retrying }: {
+  status: ProvisioningStatus
+  onRetry: () => void
+  retrying: boolean
+}) {
+  const inProgress = status.state === 'running' || status.state === 'pending'
+  const stepLabel = status.step ? SETUP_STEP_LABEL[status.step] : null
+  const title = inProgress
+    ? `Setting up classification data${stepLabel ? ` — ${stepLabel.toLowerCase()}…` : '…'}`
+    : status.state === 'not_configured'
+      ? 'Classification setup is not configured'
+      : `Classification setup failed${stepLabel ? ` while ${stepLabel.toLowerCase()}` : ''}`
+  const tone = inProgress
+    ? { border: 'var(--info-bg)', icon: 'var(--info)' }
+    : { border: 'var(--danger-bg)', icon: 'var(--danger)' }
+  return (
+    <div role={inProgress ? 'status' : 'alert'} style={{
+      display: 'flex', gap: 12, alignItems: 'flex-start',
+      background: 'var(--db-white)', border: `1px solid ${tone.border}`,
+      borderLeft: `4px solid ${tone.icon}`, borderRadius: 8,
+      padding: '14px 18px', marginBottom: 20, fontFamily: 'var(--font-sans)',
+      textAlign: 'left', width: '100%', maxWidth: 1280, boxSizing: 'border-box',
+    }}>
+      <Icon name="info" size={18} color={tone.icon} style={{ marginTop: 1 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--db-navy-800)' }}>{title}</div>
+        {inProgress ? (
+          <div style={{ fontSize: 13, color: 'var(--db-gray-text)', marginTop: 4 }}>
+            Proposals appear once the first sync completes. This can take several minutes.
+          </div>
+        ) : (
+          <>
+            {status.hint && (
+              <div style={{ fontSize: 13, color: 'var(--db-navy-800)', marginTop: 6 }}>{status.hint}</div>
+            )}
+            {status.servicePrincipal && (
+              <div style={{ fontSize: 12, color: 'var(--db-gray-text)', marginTop: 6 }}>
+                App service principal: <code style={{ fontFamily: 'var(--font-mono)' }}>{status.servicePrincipal}</code>
+              </div>
+            )}
+            {status.error && (
+              <pre style={{
+                fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--danger)',
+                background: 'var(--db-oat-light)', borderRadius: 6, padding: '8px 10px',
+                margin: '8px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                maxHeight: 160, overflow: 'auto',
+              }}>{status.error}</pre>
+            )}
+            <div style={{ fontSize: 12, color: 'var(--db-gray-text)', marginTop: 6 }}>
+              After granting the missing permissions, click Retry setup.
+              {status.updatedAt && ` Last attempt: ${new Date(status.updatedAt).toLocaleString()}.`}
+            </div>
+          </>
+        )}
+      </div>
+      {!inProgress && (
+        <Btn onClick={onRetry} disabled={retrying} style={{ flexShrink: 0 }}>
+          <Icon name="refresh" size={13} /> Retry setup
+        </Btn>
+      )}
+    </div>
+  )
 }
 
 export function AdminDashboard() {
   const [catalogFilter, setCatalogFilter] = useState<string>('')
 
-  const { data: proposals = [], isLoading, isError } = useQuery({
-    queryKey: ['proposals'],
-    queryFn: () => api.getProposals(),
+  const { data: stats, isLoading, isError, error } = useQuery({
+    queryKey: ['proposals', 'stats', catalogFilter],
+    queryFn: () => api.getOverviewStats(catalogFilter || undefined),
+    placeholderData: keepPreviousData,
   })
+  const { data: facets } = useQuery({
+    queryKey: ['proposals', 'facets', '', ''],
+    queryFn: () => api.getProposalFacets(),
+  })
+  const catalogs = facets?.catalogs ?? []
+
+  const metrics = useMemo(() => {
+    const s = stats ?? {
+      total: 0, approved: 0, rejected: 0, modified: 0, pending: 0, applied: 0,
+      approvalRate: 0, tableCount: 0, byCatalog: [], byTag: [], byOwner: [],
+    }
+    // KPI "pending" keeps its old meaning: everything not approved/rejected/modified.
+    return { ...s, pending: s.total - s.approved - s.rejected - s.modified }
+  }, [stats])
+  const tableCount = metrics.tableCount
 
   const { data: stewards = [] } = useQuery<Principal[]>({
     queryKey: ['stewards'],
     queryFn: api.getStewards,
   })
 
-  const catalogs = useMemo(
-    () => [...new Set(proposals.map(p => p.catalog))],
-    [proposals],
-  )
-
-  const metrics = useMemo(() => {
-    const filtered: Proposal[] = catalogFilter
-      ? proposals.filter(p => p.catalog === catalogFilter)
-      : proposals
-    const total = filtered.length
-    const approved = filtered.filter(p => p.status === 'approved').length
-    const rejected = filtered.filter(p => p.status === 'rejected').length
-    const modified = filtered.filter(p => p.status === 'modified').length
-    const pending = total - approved - rejected - modified
-
-    const byCatalog = new Map<string, CatalogRow>()
-    const byTag = new Map<string, TagRow>()
-    const byOwner = new Map<string, {
-      owner: string; total: number; pending: number; approved: number; rejected: number; modified: number; applied: number
-    }>()
-
-    for (const p of filtered) {
-      let c = byCatalog.get(p.catalog)
-      if (!c) {
-        c = { catalog: p.catalog, tables: new Set<string>(), total: 0, pending: 0, approved: 0, rejected: 0, modified: 0, applied: 0 }
-        byCatalog.set(p.catalog, c)
-      }
-      c.total++
-      c[p.status as ClassificationStatus]++
-      c.tables.add(p.tableKey)
-
-      let t = byTag.get(p.classTag)
-      if (!t) {
-        t = { tag: p.classTag, total: 0, pending: 0, approved: 0, rejected: 0, modified: 0, applied: 0 }
-        byTag.set(p.classTag, t)
-      }
-      t.total++
-      t[p.status as ClassificationStatus]++
-
-      let o = byOwner.get(p.owner)
-      if (!o) {
-        o = { owner: p.owner, total: 0, pending: 0, approved: 0, rejected: 0, modified: 0, applied: 0 }
-        byOwner.set(p.owner, o)
-      }
-      o.total++
-      o[p.status as ClassificationStatus]++
-    }
-
-    const decided = approved + rejected + modified
-    const approvalRate = decided > 0 ? Math.round(((approved + modified) / decided) * 100) : 0
-
-    return {
-      total, approved, rejected, modified, pending, approvalRate,
-      byCatalog: [...byCatalog.values()],
-      byTag: [...byTag.values()],
-      byOwner: [...byOwner.values()],
-    }
-  }, [proposals, catalogFilter])
-
   const stewardLookup = useMemo(() => {
     const m = new Map<string, Principal>()
     for (const s of stewards) m.set(s.id, s)
     return m
   }, [stewards])
-
-  const tableCount = useMemo(
-    () => metrics.byCatalog.reduce((s, c) => s + c.tables.size, 0),
-    [metrics.byCatalog],
-  )
 
   const pendingPct = metrics.total > 0
     ? Math.round((metrics.pending / metrics.total) * 100)
@@ -147,8 +155,65 @@ export function AdminDashboard() {
     ? Math.max(...metrics.byTag.map(t => t.total))
     : 1
 
+  const queryClient = useQueryClient()
+
+  const { data: sync } = useQuery({
+    queryKey: ['syncStatus'],
+    queryFn: api.getSyncStatus,
+    refetchInterval: (query) => (query.state.data?.running ? 3000 : false),
+  })
+
+  const refresh = useMutation({
+    mutationFn: api.refreshSync,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
+      queryClient.invalidateQueries({ queryKey: ['proposals'] })
+      queryClient.invalidateQueries({ queryKey: ['tables'] })
+    },
+  })
+
+  // Reload proposals when a sync — or the setup that runs the first sync — finishes.
+  const wasRunning = useRef(false)
+  useEffect(() => {
+    const running = !!sync?.running
+    if (wasRunning.current && !running) {
+      queryClient.invalidateQueries({ queryKey: ['proposals'] })
+      queryClient.invalidateQueries({ queryKey: ['tables'] })
+    }
+    wasRunning.current = running
+  }, [sync?.running, queryClient])
+
+  const setup = isSetupIncomplete(sync?.provisioning) ? sync.provisioning : null
+  const refreshLabel = setup
+    ? (sync?.running ? 'Setting up…' : 'Retry setup')
+    : (sync?.running ? 'Syncing…' : 'Refresh')
+  const setupBanner = setup && (
+    <SetupBanner status={setup} onRetry={() => refresh.mutate()}
+      retrying={!!sync?.running || refresh.isPending} />
+  )
+
   if (isLoading) return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-sans)', color: 'var(--db-gray-text)' }}>Loading…</div>
-  if (isError) return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-sans)', color: 'var(--db-lava-600)' }}>Failed to load data. Please refresh.</div>
+  if (isError) {
+    const is503 = (error as any)?.status === 503
+    if (is503) return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, fontFamily: 'var(--font-sans)', padding: '28px 32px' }}>
+        {setupBanner}
+        {!setup && <>
+          <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--db-navy-800)' }}>Classification sync pending</div>
+          <div style={{ fontSize: 13, color: 'var(--db-gray-text)', maxWidth: 360, textAlign: 'center' }}>No synced data yet. Click Refresh to trigger the first sync.</div>
+          <Btn onClick={() => refresh.mutate()} disabled={!!sync?.running || refresh.isPending}>
+            {refreshLabel}
+          </Btn>
+        </>}
+      </div>
+    )
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, fontFamily: 'var(--font-sans)', padding: '28px 32px' }}>
+        {setupBanner}
+        <div style={{ color: 'var(--db-lava-600)' }}>Failed to load data. Please refresh.</div>
+      </div>
+    )
+  }
 
   return (
     <div style={{
@@ -156,6 +221,7 @@ export function AdminDashboard() {
       padding: '28px 32px 48px',
     }}>
       <div style={{ maxWidth: 1280 }}>
+        {setupBanner}
         {/* Header band */}
         <div style={{
           display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
@@ -180,6 +246,14 @@ export function AdminDashboard() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 4 }}>
+              <span style={{ fontSize: 12, color: 'var(--db-gray-text)' }}>
+                Last synced: {sync?.lastSyncEnd ? new Date(sync.lastSyncEnd).toLocaleString() : '—'}
+              </span>
+              <Btn onClick={() => refresh.mutate()} disabled={!!sync?.running || refresh.isPending}>
+                {refreshLabel}
+              </Btn>
+            </div>
             <FilterChip
               label="Catalog"
               value={catalogFilter}
@@ -274,7 +348,7 @@ export function AdminDashboard() {
                         padding: '12px 16px', fontFamily: 'var(--font-mono)',
                         fontSize: 12.5, color: 'var(--db-navy-800)',
                       }}>
-                        {c.tables.size}
+                        {c.tables}
                       </td>
                       <td style={{
                         padding: '12px 16px', fontFamily: 'var(--font-mono)',

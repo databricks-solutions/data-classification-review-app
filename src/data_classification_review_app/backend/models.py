@@ -23,6 +23,14 @@ class PrincipalSearchResult(BaseModel):
     members: Optional[int] = None
 
 
+class PrincipalSearchResponse(BaseModel):
+    results: list[PrincipalSearchResult]
+    # Per-kind outcome: "ok" | "exact_only" (users only: substring search throttled,
+    # full-email lookups still work) | "error" | "skipped" (kind not requested).
+    users_status: str = "skipped"
+    groups_status: str = "skipped"
+
+
 class PrincipalOut(BaseModel):
     id: str
     name: str
@@ -49,7 +57,8 @@ class MeOut(BaseModel):
 
 
 class ProposalOut(BaseModel):
-    key: str
+    key: str            # unique per proposal; opaque to clients
+    column_key: str     # catalog.schema.table.column
     catalog: str
     schema_name: str
     table: str
@@ -85,7 +94,60 @@ class TableSummaryOut(BaseModel):
     modified: int
     high_conf: int
     low_conf: int
+    tags: list[str] = []
     proposals: list[ProposalOut] = []
+
+
+class ProposalPageOut(BaseModel):
+    items: list[ProposalOut]
+    total: int
+    page: int
+    page_size: int
+
+
+class StatusCountsOut(BaseModel):
+    total: int = 0
+    pending: int = 0
+    approved: int = 0
+    rejected: int = 0
+    modified: int = 0
+    applied: int = 0
+
+
+class CatalogStatsOut(StatusCountsOut):
+    catalog: str
+    tables: int
+
+
+class TagStatsOut(StatusCountsOut):
+    tag: str
+
+
+class OwnerStatsOut(StatusCountsOut):
+    owner: str
+
+
+class OverviewStatsOut(StatusCountsOut):
+    approval_rate: int
+    table_count: int
+    by_catalog: list[CatalogStatsOut]
+    by_tag: list[TagStatsOut]
+    by_owner: list[OwnerStatsOut]
+
+
+class FacetsOut(BaseModel):
+    catalogs: list[str]
+    schemas: list[str]
+    tables: list[str]
+    tags: list[str]
+    stewards: list[str]
+
+
+class CoverageOut(BaseModel):
+    table_count: int
+    proposal_count: int
+    pending: int
+    tables: list[str]
 
 
 class ColumnDetailOut(BaseModel):
@@ -172,9 +234,15 @@ class SaveDecisionsOut(BaseModel):
     saved: int
 
 
+class ApplyTagItem(BaseModel):
+    """One proposal to apply: the scanner's class_tag, or the tag a steward added."""
+    column_key: str
+    class_tag: str
+    user_added: bool = False
+
+
 class ApplyTagsIn(BaseModel):
-    column_keys: list[str]
-    class_tags: dict[str, str] = {}  # column_key → class_tag, used as fallback when no modified_tag
+    items: list[ApplyTagItem]
 
 
 class ApplyTagsOut(BaseModel):

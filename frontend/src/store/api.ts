@@ -1,7 +1,8 @@
 import type {
   Proposal, TableSummary, ColumnsResponse, DecisionPatch,
-  AuditEntry, StewardAssignment, Principal, PrincipalSearchResult, ApplyTagsResult, MeResponse,
-  TagConfig, TagRefreshResult, TagPatchResult, TableSamplesResult,
+  AuditEntry, StewardAssignment, Principal, PrincipalSearchResult, PrincipalSearchResponse, ApplyTagItem, ApplyTagsResult, MeResponse,
+  TagConfig, TagRefreshResult, TagPatchResult, TableSamplesResult, SyncStatus,
+  ProposalPage, ProposalQuery, OverviewStats, ProposalFacets, Coverage,
 } from './types'
 
 const BASE = '/api'
@@ -37,7 +38,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText)
-    throw new Error(`${res.status}: ${text}`)
+    const err = new Error(`${res.status}: ${text}`) as Error & { status: number }
+    err.status = res.status
+    throw err
   }
   if (res.status === 204) return undefined as T
   const json = await res.json()
@@ -73,10 +76,29 @@ function qs(params: Record<string, string | undefined>): string {
 export const api = {
   getMe: () => req<MeResponse>('/me'),
 
-  getProposals: (p?: { catalog?: string; schema?: string; table?: string; owner?: string }) =>
-    req<Proposal[]>(`/proposals${qs(p ?? {})}`),
+  listProposals: ({ page, pageSize, ...filters }: ProposalQuery) =>
+    req<ProposalPage>(`/proposals${qs({
+      ...filters, page: page?.toString(), page_size: pageSize?.toString(),
+    })}`),
 
-  getTables: () => req<TableSummary[]>('/tables'),
+  getDecidedProposals: () => req<Proposal[]>('/proposals/decided'),
+
+  getProposalFacets: (p?: { catalog?: string; schema?: string }) =>
+    req<ProposalFacets>(`/proposals/facets${qs(p ?? {})}`),
+
+  getOverviewStats: (catalog?: string) =>
+    req<OverviewStats>(`/overview/stats${qs({ catalog })}`),
+
+  getStewardTables: (steward: string, search?: string) =>
+    req<TableSummary[]>(`/tables${qs({ steward, search })}`),
+
+  getTableDetail: (catalog: string, schema: string, table: string) =>
+    req<TableSummary>(
+      `/tables/${encodeURIComponent(catalog)}/${encodeURIComponent(schema)}/${encodeURIComponent(table)}`
+    ),
+
+  getCoverage: (a: { catalog: string; schema?: string; table?: string }) =>
+    req<Coverage>(`/coverage${qs(a)}`),
 
   getColumns: (catalog: string, schema: string, table: string) =>
     req<ColumnsResponse>(`/tables/${catalog}/${schema}/${table}/columns`),
@@ -92,11 +114,8 @@ export const api = {
   getDecisions: (p?: { reviewer?: string; since?: string }) =>
     req<AuditEntry[]>(`/decisions${qs(p ?? {})}`),
 
-  applyTags: (columnKeys: string[], classTags: Record<string, string>) =>
-    req<ApplyTagsResult>('/apply-tags', {
-      method: 'POST',
-      body: JSON.stringify({ column_keys: columnKeys, class_tags: classTags }),
-    }),
+  applyTags: (items: ApplyTagItem[]) =>
+    req<ApplyTagsResult>('/apply-tags', { method: 'POST', body: bodyOf({ items }) }),
 
   getStewards: () => req<Principal[]>('/stewards'),
 
@@ -118,7 +137,7 @@ export const api = {
     req<void>(`/stewards/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   searchStewards: (q: string, kind: 'user' | 'group' | 'all' = 'all') =>
-    req<PrincipalSearchResult[]>(`/stewards/search?q=${encodeURIComponent(q)}&kind=${kind}`),
+    req<PrincipalSearchResponse>(`/stewards/search?q=${encodeURIComponent(q)}&kind=${kind}`),
 
   postSteward: (p: PrincipalSearchResult) =>
     req<Principal>('/stewards', { method: 'POST', body: bodyOf(p) }),
@@ -134,4 +153,8 @@ export const api = {
       method: 'PATCH',
       body: bodyOf({ enabled, force }),
     }),
+
+  getSyncStatus: () => req<SyncStatus>('/classification-sync/status'),
+
+  refreshSync: () => req<{ started: boolean; running: boolean; provisioning?: boolean }>('/classification-sync/refresh', { method: 'POST' }),
 }

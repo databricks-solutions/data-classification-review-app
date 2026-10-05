@@ -12,6 +12,14 @@ _token_expires_at: float = 0  # unix timestamp; 0 = not yet fetched
 _TOKEN_REFRESH_BUFFER = 120   # rebuild pool this many seconds before token expires
 _sdk_user: str | None = None  # cached SDK user for when LAKEBASE_USER is unset
 
+# The app's own tables live in this schema, not `public`: since PostgreSQL 15 ordinary
+# roles can't create in `public`, while the app SP does get CREATE on the database from
+# the app's Lakebase resource (CAN_CONNECT_AND_CREATE) — so it creates and owns this
+# schema itself, without DATABRICKS_SUPERUSER. Every connection's search_path points
+# here, so migrations and queries keep using unqualified table names. (The synced
+# classification table is always read schema-qualified.)
+APP_SCHEMA = "data_classification_review_app"
+_SEARCH_PATH_OPTION = f"-c search_path={APP_SCHEMA}"
 
 def _is_local() -> bool:
     return not bool(os.environ.get("LAKEBASE_HOST"))
@@ -37,6 +45,13 @@ def _generate_token() -> tuple[str, float]:
     return cred.token, expiry
 
 
+def _lakebase_database() -> str:
+    # Postgres database name (not the …/databases/<id> resource path). deploy.sh
+    # takes it from --lakebase-database; it must match CLASSIFICATION_SYNC_PG_DATABASE
+    # so the app reads the synced table from the database it lands in.
+    return os.environ.get("LAKEBASE_DATABASE") or "databricks_postgres"
+
+
 def _build_dsn(token: str | None = None) -> dict:
     if os.environ.get("LAKEBASE_HOST"):
         if token is None:
@@ -45,10 +60,11 @@ def _build_dsn(token: str | None = None) -> dict:
         return dict(
             host=os.environ["LAKEBASE_HOST"],
             port=int(os.environ.get("LAKEBASE_PORT", "5432")),
-            dbname=os.environ.get("LAKEBASE_DATABASE", "databricks_postgres"),
+            dbname=_lakebase_database(),
             user=user,
             password=token,
             sslmode="require",
+            options=_SEARCH_PATH_OPTION,
         )
     # Local dev: APX PGLite
     return dict(
@@ -58,6 +74,7 @@ def _build_dsn(token: str | None = None) -> dict:
         user=os.environ.get("APX_DEV_DB_USER", "postgres"),
         password=os.environ.get("APX_DEV_DB_PWD", "password"),
         sslmode="disable",
+        options=_SEARCH_PATH_OPTION,
     )
 
 
@@ -102,10 +119,18 @@ async def init_db() -> None:
     import pathlib
     migrations_dir = pathlib.Path(__file__).parent / "migrations"
     migration_files = sorted(migrations_dir.glob("*.sql"))
+    if not _is_local():
+        from ..core._config import logger
+        logger.info("Lakebase database: %s (schema %s)", _lakebase_database(), APP_SCHEMA)
     conn = get_conn()
     try:
-        # Bootstrap migration tracking table (IF NOT EXISTS is ownership-free when table already exists).
         with conn.cursor() as cur:
+            # The app SP creates and owns its schema (CREATE on the database comes
+            # from the app's Lakebase resource). Tables an earlier version left in
+            # `public` are not touched: an admin copies them, optionally, with the
+            # upgrade notebook (upgrade/copy_legacy_public_tables).
+            cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{APP_SCHEMA}"')
+            # Bootstrap migration tracking table (IF NOT EXISTS is ownership-free when table already exists).
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS schema_migrations (
                     version TEXT PRIMARY KEY,

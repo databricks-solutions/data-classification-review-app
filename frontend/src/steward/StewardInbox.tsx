@@ -1,8 +1,9 @@
 import { useState, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { Icon, Pill, TagPill, Btn, AssetPath } from '../components'
 import { api } from '../store/api'
 import { useAppStore } from '../store/useAppStore'
+import { useDebounced } from '../store/useDebounced'
 import type { TableSummary } from '../store/types'
 
 interface StewardInboxProps {
@@ -16,25 +17,21 @@ export function StewardInbox({ onOpenTable }: StewardInboxProps) {
   const [filterSchema, setFilterSchema] = useState('')
   const currentUser = useAppStore(s => s.currentUser)
 
-  const { data: allTables = [], isLoading } = useQuery({
-    queryKey: ['tables'],
-    queryFn: api.getTables,
-  })
-
-  const { data: myAssignments = [] } = useQuery({
-    queryKey: ['assignments', currentUser?.id],
-    queryFn: () => api.getAssignments(currentUser!.id),
+  const { data: myTables = [], isLoading } = useQuery({
+    queryKey: ['tables', 'steward', currentUser?.id],
+    queryFn: () => api.getStewardTables(currentUser!.id),
     enabled: !!currentUser,
   })
 
-  const myTables = allTables.filter(t =>
-    myAssignments.some(a => {
-      if (a.catalog !== t.catalog) return false
-      if (a.scope === 'catalog') return true
-      if (a.scope === 'schema') return a.schemaName === t.schema
-      return a.schemaName === t.schema && a.tableName === t.table
-    })
-  )
+  // Column-name search runs server-side (summaries no longer carry their proposals).
+  const search = useDebounced(searchQuery.trim())
+  const { data: searchHits } = useQuery({
+    queryKey: ['tables', 'steward', currentUser?.id, search],
+    queryFn: () => api.getStewardTables(currentUser!.id, search),
+    enabled: !!currentUser && search !== '',
+    placeholderData: keepPreviousData,
+  })
+  const hitKeys = useMemo(() => new Set((searchHits ?? []).map(t => t.key)), [searchHits])
 
   const catalogs = useMemo(() => [...new Set(myTables.map(t => t.catalog))].sort(), [myTables])
   const schemas = useMemo(() => {
@@ -46,20 +43,12 @@ export function StewardInbox({ onOpenTable }: StewardInboxProps) {
     let result = showAll ? myTables : myTables.filter(t => t.pending > 0)
     if (filterCatalog) result = result.filter(t => t.catalog === filterCatalog)
     if (filterSchema) result = result.filter(t => t.schema === filterSchema)
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim()
-      result = result.filter(t =>
-        t.table.toLowerCase().includes(q) ||
-        t.schema.toLowerCase().includes(q) ||
-        t.catalog.toLowerCase().includes(q) ||
-        t.proposals.some(p => p.column.toLowerCase().includes(q))
-      )
-    }
+    if (search && searchHits) result = result.filter(t => hitKeys.has(t.key))
     return result
-  }, [myTables, showAll, filterCatalog, filterSchema, searchQuery])
+  }, [myTables, showAll, filterCatalog, filterSchema, search, searchHits, hitKeys])
 
   const totalPending = myTables.reduce((s, t) => s + t.pending, 0)
-  const totalProposals = myTables.reduce((s, t) => s + (t.proposalCount ?? t.proposals.length), 0)
+  const totalProposals = myTables.reduce((s, t) => s + t.proposalCount, 0)
   const allReviewed = myTables.length > 0 && totalPending === 0
   const hasFilters = searchQuery.trim() !== '' || filterCatalog !== '' || filterSchema !== ''
 
@@ -273,7 +262,7 @@ export function StewardInbox({ onOpenTable }: StewardInboxProps) {
 }
 
 function TableCard({ t, onOpen }: { t: TableSummary; onOpen: () => void }) {
-  const tags = Array.from(new Set(t.proposals.map(p => p.classTag)))
+  const tags = t.tags
   return (
     <div
       onClick={onOpen}

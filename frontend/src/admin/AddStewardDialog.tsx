@@ -2,7 +2,7 @@ import { useRef, useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Icon, Avatar, Btn, Pill } from '../components'
 import { api } from '../store/api'
-import type { PrincipalSearchResult } from '../store/types'
+import type { PrincipalSearchResult, PrincipalSearchResponse } from '../store/types'
 
 type KindFilter = 'all' | 'user' | 'group'
 
@@ -26,12 +26,21 @@ export function AddStewardDialog({ onClose }: Props) {
     return () => clearTimeout(t)
   }, [q])
 
-  const { data: results = [], isFetching, isError } = useQuery<PrincipalSearchResult[]>({
+  const { data, isFetching, isError } = useQuery<PrincipalSearchResponse>({
     queryKey: ['stewards-search', debouncedQ, kind],
     queryFn: () => api.searchStewards(debouncedQ, kind),
     enabled: debouncedQ.length >= 2,
     staleTime: 30_000,
   })
+  const results = data?.results ?? []
+
+  // Partial-search notices: one kind can fail or be throttled while the other still returns.
+  const notices: string[] = []
+  if (data?.usersStatus === 'exact_only' && !results.some(r => r.kind === 'user')) {
+    notices.push("This workspace doesn't allow searching users by name. Type a user's full email address to find them.")
+  }
+  if (data?.usersStatus === 'error') notices.push('User search failed. Showing groups only.')
+  if (data?.groupsStatus === 'error') notices.push('Group search failed. Showing users only.')
 
   const addMutation = useMutation({
     mutationFn: (p: PrincipalSearchResult) => api.postSteward(p),
@@ -133,9 +142,19 @@ export function AddStewardDialog({ onClose }: Props) {
           )}
           {debouncedQ.length >= 2 && isError && (
             <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--db-lava-600)', fontSize: 13 }}>
-              Search failed — check that you have SCIM read permissions
+              Search failed. The workspace directory (SCIM) request was rejected; check the app logs.
             </div>
           )}
+          {debouncedQ.length >= 2 && !isFetching && !isError && notices.map(n => (
+            <div key={n} style={{
+              display: 'flex', alignItems: 'flex-start', gap: 8, margin: '4px 0 8px',
+              padding: '8px 12px', borderRadius: 6, fontSize: 12.5, color: 'var(--db-navy-800)',
+              border: '1px solid var(--db-gray-lines)', borderLeft: '3px solid var(--db-yellow-600)',
+            }}>
+              <Icon name="info" size={14} color="var(--db-yellow-700)" style={{ marginTop: 1 }} />
+              <span>{n}</span>
+            </div>
+          ))}
           {debouncedQ.length >= 2 && !isFetching && !isError && results.length === 0 && (
             <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--db-gray-text)', fontSize: 13 }}>
               No results found

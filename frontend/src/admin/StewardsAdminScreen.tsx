@@ -1,10 +1,10 @@
 import { useMemo, useRef, useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueries, useQueryClient } from '@tanstack/react-query'
 import { Icon, Pill, Btn, Avatar, AssetPath, SearchableSelect } from '../components'
 import { api } from '../store/api'
 import { AddStewardDialog } from './AddStewardDialog'
 import type {
-  Principal, StewardAssignment, AssignmentScope, TableSummary,
+  Principal, StewardAssignment, AssignmentScope,
 } from '../store/types'
 
 type KindFilter = 'all' | 'user' | 'group'
@@ -15,11 +15,6 @@ export function StewardsAdminScreen() {
   const { data: principals = [], isLoading } = useQuery<Principal[]>({
     queryKey: ['stewards'],
     queryFn: api.getStewards,
-  })
-
-  const { data: tables = [] } = useQuery<TableSummary[]>({
-    queryKey: ['tables'],
-    queryFn: api.getTables,
   })
 
   const [filter, setFilter] = useState('')
@@ -35,6 +30,7 @@ export function StewardsAdminScreen() {
       queryClient.invalidateQueries({ queryKey: ['assignments', selected?.id] })
       queryClient.invalidateQueries({ queryKey: ['stewards'] })
       queryClient.invalidateQueries({ queryKey: ['tables'] })
+      queryClient.invalidateQueries({ queryKey: ['proposals'] })
     },
     onError: () => setError('Failed to remove assignment'),
   })
@@ -45,6 +41,7 @@ export function StewardsAdminScreen() {
       setSelectedId(null)
       queryClient.invalidateQueries({ queryKey: ['stewards'] })
       queryClient.invalidateQueries({ queryKey: ['tables'] })
+      queryClient.invalidateQueries({ queryKey: ['proposals'] })
     },
     onError: () => setError('Failed to remove steward'),
   })
@@ -228,7 +225,6 @@ export function StewardsAdminScreen() {
           <StewardDetailPanel
             principal={selected}
             assignments={assignments}
-            tables={tables}
             onAddRequest={() => setShowAddDialog(true)}
             onRemove={(id) => removeMutation.mutate(id)}
             onRemovePrincipal={() => removePrincipalMutation.mutate(selected.id)}
@@ -254,13 +250,13 @@ export function StewardsAdminScreen() {
       {showAddDialog && selected && (
         <NewAssignmentDialog
           principal={selected}
-          tables={tables}
           onClose={() => setShowAddDialog(false)}
           onCreate={async (payload) => {
             await api.postAssignment(payload)
             queryClient.invalidateQueries({ queryKey: ['assignments', selected.id] })
             queryClient.invalidateQueries({ queryKey: ['stewards'] })
             queryClient.invalidateQueries({ queryKey: ['tables'] })
+            queryClient.invalidateQueries({ queryKey: ['proposals'] })
             setShowAddDialog(false)
           }}
         />
@@ -274,17 +270,17 @@ export function StewardsAdminScreen() {
 // ────────────────────────────────────────────────────────────────────────────
 
 interface DerivedAssignment extends StewardAssignment {
-  coveredTables: string[]      // "catalog.schema.table"
+  coveredTables: string[]      // first 200 "catalog.schema.table"
+  tableCount: number
   proposalCount: number
   pending: number
 }
 
 function StewardDetailPanel({
-  principal, assignments, tables, onAddRequest, onRemove, onRemovePrincipal, error, onClearError, onSetError,
+  principal, assignments, onAddRequest, onRemove, onRemovePrincipal, error, onClearError, onSetError,
 }: {
   principal: Principal
   assignments: StewardAssignment[]
-  tables: TableSummary[]
   onAddRequest: () => void
   onRemove: (id: string) => void
   onRemovePrincipal: () => void
@@ -294,24 +290,36 @@ function StewardDetailPanel({
 }) {
   const queryClient = useQueryClient()
 
-  const derived = useMemo<DerivedAssignment[]>(() => {
-    return assignments.map(a => {
-      const matches = tables.filter(t => {
-        if (t.catalog !== a.catalog) return false
-        if (a.scope !== 'catalog' && t.schema !== a.schemaName) return false
-        if (a.scope === 'table' && t.table !== a.tableName) return false
-        return true
-      })
-      const coveredTables = matches.map(t => `${t.catalog}.${t.schema}.${t.table}`)
-      const proposalCount = matches.reduce((s, t) => s + (t.proposalCount ?? t.proposals.length), 0)
-      const pending = matches.reduce((s, t) => s + t.pending, 0)
-      return { ...a, coveredTables, proposalCount, pending }
-    })
-  }, [assignments, tables])
+  const coverage = useQueries({
+    queries: assignments.map(a => ({
+      queryKey: ['proposals', 'coverage', a.catalog,
+        a.scope !== 'catalog' ? a.schemaName ?? '' : '',
+        a.scope === 'table' ? a.tableName ?? '' : ''],
+      queryFn: () => api.getCoverage({
+        catalog: a.catalog,
+        schema: a.scope !== 'catalog' ? a.schemaName : undefined,
+        table: a.scope === 'table' ? a.tableName : undefined,
+      }),
+    })),
+  })
+
+  const derived: DerivedAssignment[] = assignments.map((a, i) => {
+    const c = coverage[i]?.data
+    return {
+      ...a,
+      coveredTables: c?.tables ?? [],
+      tableCount: c?.tableCount ?? 0,
+      proposalCount: c?.proposalCount ?? 0,
+      pending: c?.pending ?? 0,
+    }
+  })
 
   const totalProposals = derived.reduce((s, a) => s + a.proposalCount, 0)
   const totalPending = derived.reduce((s, a) => s + a.pending, 0)
-  const tableCount = new Set(derived.flatMap(a => a.coveredTables)).size
+  const truncated = derived.some(a => a.tableCount > a.coveredTables.length)
+  const tableCount = truncated
+    ? derived.reduce((s, a) => s + a.tableCount, 0)
+    : new Set(derived.flatMap(a => a.coveredTables)).size
 
   const isUser = principal.kind === 'user'
   const [showConfirmRemove, setShowConfirmRemove] = useState(false)
@@ -583,7 +591,7 @@ function AssignmentRow({
         </div>
         <div style={{ fontSize: 12, color: 'var(--db-gray-text)', textAlign: 'right' }}>
           <div style={{ fontFamily: 'var(--font-mono)', color: 'var(--db-navy-800)', fontWeight: 500 }}>
-            {assignment.coveredTables.length} table{assignment.coveredTables.length === 1 ? '' : 's'}
+            {assignment.tableCount} table{assignment.tableCount === 1 ? '' : 's'}
           </div>
           <div style={{ fontFamily: 'var(--font-mono)', marginTop: 2 }}>
             {assignment.proposalCount} proposals
@@ -640,6 +648,11 @@ function AssignmentRow({
                 </div>
               )
             })}
+            {assignment.tableCount > assignment.coveredTables.length && (
+              <div style={{ fontSize: 11, color: 'var(--db-gray-text)', marginTop: 2 }}>
+                …and {assignment.tableCount - assignment.coveredTables.length} more
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -652,32 +665,33 @@ function AssignmentRow({
 // ────────────────────────────────────────────────────────────────────────────
 
 function NewAssignmentDialog({
-  principal, tables, onClose, onCreate,
+  principal, onClose, onCreate,
 }: {
   principal: Principal
-  tables: TableSummary[]
   onClose: () => void
   onCreate: (payload: Omit<StewardAssignment, 'id'>) => void
 }) {
-  const catalogs = useMemo(
-    () => [...new Set(tables.map(t => t.catalog))].sort(),
-    [tables],
-  )
+  const { data: rootFacets } = useQuery({
+    queryKey: ['proposals', 'facets', '', ''],
+    queryFn: () => api.getProposalFacets(),
+  })
+  const catalogs = rootFacets?.catalogs ?? []
 
   const [scope, setScope] = useState<AssignmentScope>('table')
-  const [catalog, setCatalog] = useState<string>(catalogs[0] ?? '')
+  const [catalog, setCatalog] = useState<string>('')
   const [schema, setSchema] = useState<string>('')
   const [tbl, setTbl] = useState<string>('')
 
-  const schemas = useMemo(
-    () => [...new Set(tables.filter(t => t.catalog === catalog).map(t => t.schema))].sort(),
-    [tables, catalog],
-  )
+  // Default to the first catalog once the list arrives.
+  useEffect(() => { if (!catalog && catalogs.length) setCatalog(catalogs[0]) }, [catalog, catalogs])
 
-  const tableList = useMemo(
-    () => [...new Set(tables.filter(t => t.catalog === catalog && t.schema === schema).map(t => t.table))].sort(),
-    [tables, catalog, schema],
-  )
+  const { data: scopedFacets } = useQuery({
+    queryKey: ['proposals', 'facets', catalog, schema],
+    queryFn: () => api.getProposalFacets({ catalog, schema: schema || undefined }),
+    enabled: !!catalog,
+  })
+  const schemas = scopedFacets?.schemas ?? []
+  const tableList = schema ? scopedFacets?.tables ?? [] : []
 
   const isValid =
     !!catalog &&

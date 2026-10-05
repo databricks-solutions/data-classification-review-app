@@ -5,6 +5,10 @@ sync:
   include:
     - .build
     - demo
+    - upgrade
+  # include overrides .gitignore, so keep Python bytecode out explicitly.
+  exclude:
+    - "**/__pycache__"
 
 variables:
   # Update to match your workspace's SQL warehouse name, or override per target below.
@@ -28,6 +32,31 @@ variables:
     default: ""
   classification_results_table:
     default: "system.data_classification.results"
+  # Classification synced-table wiring — persisted by scripts/deploy.sh in
+  # databricks.local.yml (see provision_classification_targets()). Defaults are empty
+  # so the app starts in "sync pending" state until the first install provisions them.
+  # Full UC name of the synced table (catalog.schema.table) — status lookups.
+  synced_uc_name:
+    default: ""
+  # Postgres landing name of the synced table (schema.table) — the app's read.
+  synced_pg_name:
+    default: ""
+  # Full UC name of the deduped view (catalog.schema.view) the app creates + owns.
+  classification_view_uc:
+    default: ""
+  # Postgres database name of lakebase_database (e.g. "databricks_postgres"), resolved
+  # by deploy.sh via `databricks postgres get-database` — not derivable from the path,
+  # the resource id and the Postgres name are independent. The app connects to it
+  # (LAKEBASE_DATABASE) and creates the synced table in it, as the SP.
+  lakebase_logical_db:
+    default: ""
+  # Quartz cron for the sync job, derived from --sync-interval-hours (24h → daily).
+  sync_cron:
+    default: "0 0 0 */1 * ?"
+  # Comma-separated identities (emails, or SP application ids) the app grants
+  # CAN_MANAGE on the sync job it creates — deploy.sh sets deployer + admins.
+  sync_job_managers:
+    default: ""
 
 resources:
   jobs:
@@ -82,6 +111,13 @@ resources:
             base_parameters:
               enable_dc: "{{job.parameters.enable_dc}}"
 
+    # NB: the classification_sync job is NOT a bundle resource. At startup the app,
+    # running as its service principal, creates the view + synced table and then this
+    # job — a single pipeline task that refreshes the synced table's pipeline on
+    # ${var.sync_cron} (backend/db/classification_provision.py). Created by the SP, the
+    # job runs as the SP without a run_as override, which would need the
+    # "Service Principal User" role on the SP.
+
   apps:
     data-classification-review-app:
       name: "data-classification-review-app"
@@ -115,10 +151,32 @@ resources:
             value: ${var.warehouse_id}
           - name: LAKEBASE_HOST
             value: ${var.lakebase_host}
+          # Same database as CLASSIFICATION_SYNC_PG_DATABASE: the app reads the synced
+          # table from the database it connects to.
+          - name: LAKEBASE_DATABASE
+            value: ${var.lakebase_logical_db}
           - name: LAKEBASE_ENDPOINT_NAME
             value: ${var.lakebase_endpoint_name}
           - name: ADMIN_EMAILS
             value: ${var.admin_emails}
+          - name: CLASSIFICATION_SYNCED_TABLE
+            value: ${var.synced_pg_name}
+          - name: CLASSIFICATION_SYNCED_TABLE_UC
+            value: ${var.synced_uc_name}
+          # What the app provisions (as its SP) at startup: the view it creates + owns,
+          # the Lakebase Autoscaling target of the synced table (project branch +
+          # Postgres database), the refresh job's cadence, and the identities granted
+          # CAN_MANAGE on that job.
+          - name: CLASSIFICATION_VIEW_UC
+            value: ${var.classification_view_uc}
+          - name: CLASSIFICATION_SYNC_BRANCH
+            value: ${var.lakebase_branch}
+          - name: CLASSIFICATION_SYNC_PG_DATABASE
+            value: ${var.lakebase_logical_db}
+          - name: CLASSIFICATION_SYNC_CRON
+            value: ${var.sync_cron}
+          - name: CLASSIFICATION_SYNC_JOB_MANAGERS
+            value: ${var.sync_job_managers}
 
 targets:
   dev:

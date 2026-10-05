@@ -31,13 +31,13 @@ export function ReviewDetail({ tableKey, onBack }: ReviewDetailProps) {
   const undoLocalDecision = useAppStore(s => s.undoLocalDecision)
   const clearLocalState = useAppStore(s => s.clearLocalState)
 
-  const { data: tables = [] } = useQuery({
-    queryKey: ['tables'],
-    queryFn: api.getTables,
-  })
-  const table = tables.find(t => t.key === tableKey)
-
   const [catalog, schema, tableName] = tableKey.split('.')
+
+  const { data: table, error: tableQueryError } = useQuery({
+    queryKey: ['tables', 'detail', tableKey],
+    queryFn: () => api.getTableDetail(catalog, schema, tableName),
+    enabled: Boolean(catalog && schema && tableName),
+  })
 
   const { data: columnsData, isFetching: columnsLoading } = useQuery({
     queryKey: ['columns', tableKey],
@@ -56,10 +56,7 @@ export function ReviewDetail({ tableKey, onBack }: ReviewDetailProps) {
     enabled: false,
   })
 
-  const proposals: Proposal[] = useMemo(() => {
-    if (!table) return []
-    return table.proposals
-  }, [table])
+  const proposals: Proposal[] = useMemo(() => table?.proposals ?? [], [table])
 
   const [submitError, setSubmitError] = useState<string | null>(null)
 
@@ -77,6 +74,7 @@ export function ReviewDetail({ tableKey, onBack }: ReviewDetailProps) {
   })
 
   if (!table) {
+    const errStatus = (tableQueryError as { status?: number } | null)?.status
     return (
       <div style={{
         flex: 1, overflow: 'auto', background: 'var(--db-oat-light)',
@@ -86,7 +84,13 @@ export function ReviewDetail({ tableKey, onBack }: ReviewDetailProps) {
           background: '#fff', border: '1px solid var(--db-gray-lines)',
           borderRadius: 8, padding: 24, color: 'var(--db-gray-text)', fontSize: 13,
         }}>
-          Loading table…
+          {tableQueryError
+            ? errStatus === 404
+              ? 'Table not found or has no classification proposals.'
+              : errStatus === 503
+                ? 'Classification sync pending — no synced data yet.'
+                : 'Failed to load table. Please refresh.'
+            : 'Loading table…'}
         </div>
       </div>
     )
@@ -132,10 +136,8 @@ export function ReviewDetail({ tableKey, onBack }: ReviewDetailProps) {
     for (const p of proposals) {
       const local = localDecisions[p.key]
       if (!local) continue
-      // User-added proposals have a synthetic key "{column_key}:{tag}"; extract real column_key
-      const columnKey = p.userAdded ? p.key.substring(0, p.key.lastIndexOf(':')) : p.key
       patches.push({
-        columnKey,
+        columnKey: p.columnKey,
         status: local.status,
         // For user-added proposals, preserve the original tag as modifiedTag so the backend
         // updates the correct (user_added=true) decision row
@@ -155,6 +157,7 @@ export function ReviewDetail({ tableKey, onBack }: ReviewDetailProps) {
           status: 'approved',
           modifiedTag: tag,
           comment: null,
+          classTag: tag,
           userAdded: true,
         })
       }

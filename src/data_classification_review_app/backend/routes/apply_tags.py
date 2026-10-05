@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 import os
 from fastapi import APIRouter, Request
-from ..models import ApplyTagsIn, ApplyTagsOut
+from ..models import ApplyTagItem, ApplyTagsIn, ApplyTagsOut
 from ..db.connection import execute, query as db_query
 from ..core.dependencies import Dependencies
 
@@ -15,6 +15,20 @@ def _get_reviewer(request: Request, headers: "Dependencies.Headers") -> str:
     if IS_MOCK:
         return request.headers.get("X-Mock-User", "jamie.diaz")
     return headers.user_email or os.environ.get("DEV_USER_EMAIL") or "unknown"
+
+
+def _record_applied(item: ApplyTagItem, tag: str, reviewer: str) -> None:
+    """Mark this proposal's decisions applied and record the 'applied' decision."""
+    execute(
+        "UPDATE decisions SET applied_at = now() WHERE column_key = %s AND user_added = %s "
+        "AND CASE WHEN user_added THEN COALESCE(modified_tag, class_tag) ELSE class_tag END = %s",
+        (item.column_key, item.user_added, item.class_tag),
+    )
+    execute(
+        "INSERT INTO decisions (column_key, status, modified_tag, class_tag, reviewer, user_added, applied_at) "
+        "VALUES (%s,'applied',%s,%s,%s,%s,now())",
+        (item.column_key, tag, item.class_tag, reviewer, item.user_added),
+    )
 
 
 @router.post("/apply-tags", response_model=ApplyTagsOut, operation_id="applyTags")
@@ -34,48 +48,34 @@ def apply_tags(body: ApplyTagsIn, request: Request, headers: Dependencies.Header
     applied, skipped, errors = 0, 0, []
     reviewer = _get_reviewer(request, headers)
 
-    for col_key in body.column_keys:
-        # User-added proposals carry a synthetic key "{column_key}:{tag}"; split on last ':'
-        if ':' in col_key:
-            real_col_key, explicit_tag = col_key.rsplit(':', 1)
-            is_user_added = True
-        else:
-            real_col_key = col_key
-            explicit_tag = None
-            is_user_added = False
-
-        parts = real_col_key.split(".")
+    for item in body.items:
+        col_key = item.column_key
+        parts = col_key.split(".")
         if len(parts) < 4:
             errors.append({"column_key": col_key, "error": "invalid column key format"})
             continue
         catalog, schema, table, column = parts[0], parts[1], parts[2], ".".join(parts[3:])
 
-        # Resolve the tag
-        if is_user_added:
-            tag = explicit_tag
-        else:
-            dec_rows = db_query(
-                "SELECT modified_tag FROM decisions WHERE column_key = %s AND user_added = false ORDER BY decided_at DESC LIMIT 1",
-                (real_col_key,),
+        # Resolve the tag: a steward-added proposal applies its own tag; a scanner proposal
+        # applies its modified tag, if any — its own decision first, else a legacy
+        # whole-column one (class_tag '').
+        tag = item.class_tag
+        if not item.user_added:
+            state = db_query(
+                "SELECT modified_tag FROM proposal_state WHERE catalog_name = %s AND schema_name = %s "
+                "AND table_name = %s AND column_name = %s AND NOT user_added AND class_tag IN (%s, '') "
+                "ORDER BY class_tag = '' LIMIT 1",
+                (catalog, schema, table, column, item.class_tag),
             )
-            if dec_rows and dec_rows[0].get("modified_tag"):
-                tag = dec_rows[0]["modified_tag"]
-            else:
-                tag = body.class_tags.get(col_key) or body.class_tags.get(real_col_key)
+            if state and state[0].get("modified_tag"):
+                tag = state[0]["modified_tag"]
 
         if not tag:
             skipped += 1
             continue
 
         if IS_MOCK:
-            execute(
-                "UPDATE decisions SET applied_at = now() WHERE column_key = %s AND user_added = %s",
-                (real_col_key, is_user_added),
-            )
-            execute(
-                "INSERT INTO decisions (column_key, status, modified_tag, reviewer, user_added) VALUES (%s,'applied',%s,%s,%s)",
-                (real_col_key, tag, reviewer, is_user_added),
-            )
+            _record_applied(item, tag, reviewer)
             applied += 1
             continue
 
@@ -122,14 +122,7 @@ def apply_tags(body: ApplyTagsIn, request: Request, headers: Dependencies.Header
                 f"ALTER COLUMN `{column}` SET TAGS ('{tag_key}' = '{tag_value}')",
                 token=token, host=host,
             )
-            execute(
-                "UPDATE decisions SET applied_at = now() WHERE column_key = %s AND user_added = %s",
-                (real_col_key, is_user_added),
-            )
-            execute(
-                "INSERT INTO decisions (column_key, status, modified_tag, reviewer, user_added) VALUES (%s,'applied',%s,%s,%s)",
-                (real_col_key, tag, reviewer, is_user_added),
-            )
+            _record_applied(item, tag, reviewer)
             applied += 1
         except Exception as e:
             errors.append({"column_key": col_key, "error": str(e)})

@@ -48,7 +48,12 @@ src/data_classification_review_app/__dist__/
 # stray generated API client (codegen run from the wrong working directory)
 src/data_classification_review_app/ui/
 
+# superpowers brainstorming/spec docs (local working notes, not production code)
+docs/superpowers/
+
 # local deployment configuration — holds environment-specific / internal infrastructure
 # identifiers (warehouse name, Lakebase project/branch/endpoint/host). Never commit it;
 # use databricks.local.yml.example as the committed template.
 databricks.local.yml
+# per-install widget defaults for the upgrade notebook — written by scripts/deploy.sh
+upgrade/install_defaults.json

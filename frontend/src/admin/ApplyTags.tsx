@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Icon, Pill, TagPill, StatusPill, Btn, AssetPath, FilterChip } from '../components'
 import { api } from '../store/api'
-import type { Proposal, ApplyTagsResult } from '../store/types'
+import type { Proposal, ApplyTagItem, ApplyTagsResult } from '../store/types'
 
 export function ApplyTags() {
   const queryClient = useQueryClient()
 
   const { data: proposals = [], isLoading, isError } = useQuery({
-    queryKey: ['proposals'],
-    queryFn: () => api.getProposals(),
+    queryKey: ['proposals', 'decided'],
+    queryFn: api.getDecidedProposals,
   })
 
   const [catalogFilter, setCatalogFilter] = useState('')
@@ -90,8 +90,7 @@ export function ApplyTags() {
   const hasScopeFilter = !!(catalogFilter || schemaFilter || tableFilter)
 
   const applyMutation = useMutation({
-    mutationFn: ({ columnKeys, classTags }: { columnKeys: string[]; classTags: Record<string, string> }) =>
-      api.applyTags(columnKeys, classTags),
+    mutationFn: (items: ApplyTagItem[]) => api.applyTags(items),
     onSuccess: (r: ApplyTagsResult) => {
       const msg = `Applied ${r.applied} · Skipped ${r.skipped}${r.errors.length > 0 ? ` · ${r.errors.length} errors` : ''}`
       setApplyResult(msg)
@@ -107,10 +106,9 @@ export function ApplyTags() {
   const onApply = () => {
     setApplyResult(null)
     setApplyHasErrors(false)
-    const toApply = pending
-    const classTags: Record<string, string> = {}
-    for (const p of toApply) classTags[p.key] = p.classTag
-    applyMutation.mutate({ columnKeys: toApply.map(p => p.key), classTags })
+    applyMutation.mutate(pending.map(p => ({
+      columnKey: p.columnKey, classTag: p.classTag, userAdded: p.userAdded,
+    })))
   }
 
   const clearScope = () => {

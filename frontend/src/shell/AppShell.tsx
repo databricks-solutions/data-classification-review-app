@@ -10,23 +10,20 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { role, currentUser } = useAppStore()
   const location = useLocation()
 
-  const { data: tables = [] } = useQuery({ queryKey: ['tables'], queryFn: api.getTables })
-  const { data: proposals = [] } = useQuery({ queryKey: ['proposals'], queryFn: () => api.getProposals() })
-  const { data: myAssignments = [] } = useQuery({
-    queryKey: ['assignments', currentUser?.id],
-    queryFn: () => api.getAssignments(currentUser!.id),
-    enabled: !!currentUser,
+  const isSteward = role === 'steward'
+  const { data: myTables = [] } = useQuery({
+    queryKey: ['tables', 'steward', currentUser?.id],
+    queryFn: () => api.getStewardTables(currentUser!.id),
+    enabled: !!currentUser && isSteward,
+  })
+  const { data: stats } = useQuery({
+    queryKey: ['proposals', 'stats', ''],
+    queryFn: () => api.getOverviewStats(),
+    enabled: !!currentUser && !isSteward,
   })
 
-  const pendingCount = tables
-    .filter(t => myAssignments.some(a => {
-      if (a.catalog !== t.catalog) return false
-      if (a.scope === 'catalog') return true
-      if (a.scope === 'schema') return a.schemaName === t.schema
-      return a.schemaName === t.schema && a.tableName === t.table
-    }))
-    .reduce((s, t) => s + t.pending, 0)
-  const adminPendingCount = proposals.filter(p => p.status === 'pending').length
+  const pendingCount = myTables.reduce((s, t) => s + t.pending, 0)
+  const adminPendingCount = stats?.pending ?? 0
 
   // Compute breadcrumb from location
   const breadcrumb = (() => {
@@ -34,10 +31,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (role === 'steward') {
       if (path.startsWith('/inbox/')) {
         const tableKey = decodeURIComponent(path.replace('/inbox/', ''))
-        const table = tables.find(t => t.key === tableKey)
         return [
           { label: 'My review queue', onClick: () => window.history.back() },
-          { label: table ? `${table.catalog}.${table.schema}.${table.table}` : tableKey },
+          { label: tableKey },
         ]
       }
       if (path === '/decided') return [{ label: 'My decisions' }]
