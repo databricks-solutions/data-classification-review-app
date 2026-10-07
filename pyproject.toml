@@ -1,6 +1,6 @@
 [project]
 name = "data-classification-review-app"
-version = "1.0.2"
+version = "1.1.0"
 description = "Data Classification Review App"
 readme = "README.md"
 requires-python = ">=3.11"

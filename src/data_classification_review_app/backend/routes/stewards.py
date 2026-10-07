@@ -3,7 +3,7 @@ import logging
 import os
 import uuid
 from fastapi import APIRouter, HTTPException, Query
-from ..models import PrincipalOut, PrincipalSearchResult, StewardAssignmentOut, StewardAssignmentIn, PatchStewardIn, PrincipalIn
+from ..models import PrincipalOut, PrincipalSearchResponse, StewardAssignmentOut, StewardAssignmentIn, PatchStewardIn, PrincipalIn
 from ..db.connection import query as db_query, execute, execute_returning
 from ..core.dependencies import Dependencies
 from ..core._scim import get_user_registered_group_ids
@@ -53,7 +53,7 @@ def _log_admin_action(actor: str, status: str, column_key: str, comment: str) ->
 router = APIRouter()
 
 
-@router.get("/stewards/search", response_model=list[PrincipalSearchResult], operation_id="searchStewards")
+@router.get("/stewards/search", response_model=PrincipalSearchResponse, operation_id="searchStewards")
 def search_stewards(
     q: str = Query(..., min_length=2),
     kind: str = Query("all"),
@@ -63,16 +63,15 @@ def search_stewards(
     if IS_MOCK:
         raise HTTPException(501, "Principal search is not available in mock mode")
     existing_ids = {r["id"] for r in db_query("SELECT id FROM principals")}
-    from ..core._scim import search_principals
-    try:
-        return search_principals(ws, q, kind, existing_ids)
-    except Exception as e:
-        logger.error("SCIM search failed for q=%r kind=%r: %s", q, kind, e, exc_info=True)
+    from ..core import _scim
+    resp = _scim.search_principals(_scim.fail_fast_client(ws), q, kind, existing_ids)
+    if {resp.users_status, resp.groups_status} <= {"error", "skipped"}:
         raise HTTPException(
             502,
-            "SCIM search failed. Ensure the app service principal has been granted "
-            "workspace admin or SCIM read permissions.",
+            "SCIM search failed (see app logs). Ensure the app service principal can read "
+            "workspace users and groups.",
         )
+    return resp
 
 
 def _principal_out(r: dict) -> PrincipalOut:

@@ -2,56 +2,58 @@ from __future__ import annotations
 import json
 import os
 from collections import defaultdict
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
-from ..models import TableSummaryOut, ColumnDetailOut, ColumnsResponse, ColumnSamplesOut, TableSamplesOut
+from ..models import (
+    TableSummaryOut, ColumnDetailOut, ColumnsResponse, ColumnSamplesOut, TableSamplesOut, CoverageOut,
+)
 from ..db.connection import query as db_query
+from ..db import read_model as rm
+from ..db.read_model import SyncPendingError
 from ..core.dependencies import Dependencies
+from .proposals import sync_pending_http
 
 router = APIRouter()
 IS_MOCK = os.environ.get("USE_MOCK_DATA", "false").lower() == "true"
 
 
-def _build_tables(proposals: list[dict]) -> list[dict]:
-    tables: dict[str, dict] = {}
-    for p in proposals:
-        k = p["table_key"]
-        if k not in tables:
-            tables[k] = {
-                "key": k, "catalog": p["catalog"], "schema": p.get("schema_name") or p.get("schema", ""),
-                "table": p["table"], "owner": p.get("owner", ""),
-                "last_scan": (p.get("latest_detected_time") or "2026-05-19 06:00")[:10],
-                "total_cols": 0, "proposal_count": 0,
-                "pending": 0, "approved": 0, "rejected": 0, "modified": 0,
-                "high_conf": 0, "low_conf": 0, "proposals": [],
-            }
-        t = tables[k]
-        t["proposal_count"] += 1
-        status = p.get("status", "pending")
-        t[status] = t.get(status, 0) + 1
-        if p.get("confidence") == "HIGH": t["high_conf"] += 1
-        if p.get("confidence") == "LOW":  t["low_conf"] += 1
-        t["proposals"].append(p)
-
-    if IS_MOCK:
-        # Count total columns (including unclassified) from DB
-        col_counts_rows = db_query(
-            "SELECT catalog_name||'.'||schema_name||'.'||table_name AS tkey, COUNT(*) AS cnt "
-            "FROM table_columns GROUP BY 1"
-        )
-        col_counts = {r["tkey"]: int(r["cnt"]) for r in col_counts_rows}
-        for t in tables.values():
-            t["total_cols"] = col_counts.get(t["key"], t["proposal_count"])
-    else:
-        for t in tables.values():
-            if t["total_cols"] == 0:
-                t["total_cols"] = t["proposal_count"]
-    return list(tables.values())
-
-
 @router.get("/tables", response_model=list[TableSummaryOut], operation_id="listTables")
-def get_tables():
-    from .proposals import _get_proposals
-    return _build_tables(_get_proposals())
+def get_tables(
+    steward: str = Query(...),
+    search: Optional[str] = Query(None),
+    ws: Dependencies.Client = None,
+):
+    """Per-table summaries for the tables covered by `steward`'s (direct + group) assignments."""
+    from .stewards import get_assignments
+    assignments = [a.model_dump() for a in get_assignments(steward, ws)]
+    try:
+        return rm.table_summaries(assignments, search)
+    except SyncPendingError:
+        raise sync_pending_http()
+
+
+@router.get("/tables/{catalog}/{schema}/{table}", response_model=TableSummaryOut, operation_id="getTableDetail")
+def get_table_detail(catalog: str, schema: str, table: str):
+    try:
+        detail = rm.table_detail(catalog, schema, table)
+    except SyncPendingError:
+        raise sync_pending_http()
+    if detail is None:
+        raise HTTPException(status_code=404, detail="table_not_found")
+    return detail
+
+
+@router.get("/coverage", response_model=CoverageOut, operation_id="getCoverage")
+def get_coverage(
+    catalog: str = Query(...),
+    schema: Optional[str] = Query(None),
+    table: Optional[str] = Query(None),
+):
+    scope = "table" if table else "schema" if schema else "catalog"
+    try:
+        return rm.coverage({"scope": scope, "catalog": catalog, "schema_name": schema, "table_name": table})
+    except SyncPendingError:
+        raise sync_pending_http()
 
 
 @router.get("/tables/{catalog}/{schema}/{table}/columns", response_model=ColumnsResponse, operation_id="listColumns")

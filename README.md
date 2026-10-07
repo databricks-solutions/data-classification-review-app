@@ -1,7 +1,5 @@
 # Data Classification Review
 
-A Databricks App that puts data stewards in control of Unity Catalog ML-generated classification proposals.
-
 ## Overview
 
 Databricks' Data Classification ([doc](https://docs.databricks.com/aws/en/data-governance/unity-catalog/data-classification)) in Unity Catalog automatically classifies and tag sensitive data in your catalog. Data catalogs can have a vast amount of data, often containing known and unknown sensitive data. It is critical for data teams to understand what kind of sensitive data exists in each table so that they can both govern and democratize access to this data.
@@ -22,7 +20,7 @@ The result is a governed, distributed workflow: domain experts validate the data
 
 #### 📥 Inbox
 
-A prioritised queue of pending proposals scoped to the tables the steward is assigned to. Each row shows the column name, the proposed classification tag, sample values, and any existing UC tags.
+A prioritised queue of pending proposals scoped to the tables the steward is assigned to. Each row shows the column name, the proposed classification tag, sample values, and any existing UC tags. A column with several proposed tags gets a separate decision for each tag.
 
 ### For Admins
 
@@ -34,7 +32,11 @@ A full-catalog browser scoped to the configured catalog filter. Admins can drill
 
 #### 👥 Steward Administration
 
-Assign or remove stewards using catalog, schema or table granularity. The app enforces row-level access so each steward only sees the assets they are responsible for.
+Assign or remove stewards using catalog, schema or table granularity, to individual users or groups. Each steward's inbox shows only the assets they are responsible for.
+
+#### 🔄 Classification Sync
+
+Proposals are served from a Lakebase synced table that a scheduled job refreshes from `system.data_classification.results`. An admin can trigger a refresh on demand or change the sync frequency.
 
 #### ⚙️ Tag Configuration
 
@@ -50,8 +52,6 @@ Every accept/reject/modify decision is persisted with the reviewer identity, tim
 
 ## Deploying to Databricks
 
-
-
 ### Deploy from Pre-built Artifacts (Recommended)
 
 Use this path for all standard deployments. The pre-built wheel and frontend assets are committed under `.build/` in the repository, no build tooling is needed.
@@ -63,16 +63,34 @@ Use this path for all standard deployments. The pre-built wheel and frontend ass
 - Permission to create a Databricks App
 - Permission to create a Lakehouse Project or use an existing one
 
-The deploy script automatically grants the app's service principal the two permissions it needs to read classification proposals:
+#### Deployment prerequisites (permissions)
 
-```sql
-GRANT USE CATALOG ON CATALOG system TO `<sp-client-id>`;
-GRANT SELECT ON TABLE system.data_classification.results TO `<sp-client-id>`;
-```
+The installation script by default assigns all the grants required to the technical identity associated with the deployed Databricks App. If you **lack the permissions** to assign them, you can still proceed with the installation of the App: answer **No** to the deploy's *"Assign the required grants/permissions during this deploy?"* prompt (or pass `--skip-permission-assignment`); the deploy then assumes the grants are already in place and proceeds. You can ask to a user with the right privileges to give the correct grants after the app deployment.
 
-These are the only Unity Catalog grants the service principal needs. Other interactions with Unity Catalog tables are routed through user's forwarded access token (OBO).
+**Overview**
 
-**The service principal client ID is printed partway through the deploy script (right after the app is created), so you have it on hand to run these GRANTs manually if the deployer identity can't apply them automatically. These grants currently can be assigned only by an account admin ([doc](https://docs.databricks.com/aws/en/data-governance/unity-catalog/data-classification#the-results-system-table)).**
+Legend: `<sp>` = app service principal client ID · `<catalog>`/`<schema>` = the classification catalog/schema · `<branch>` = the Lakebase branch path · `<project>` = the Lakebase project name.
+
+1. **SELECT on the classification source** — account/metastore admin ([doc](https://docs.databricks.com/aws/en/data-governance/unity-catalog/data-classification#the-results-system-table)):
+   ```sql
+   GRANT USE CATALOG ON CATALOG system TO `<sp>`;
+   GRANT SELECT ON TABLE system.data_classification.results TO `<sp>`;
+   ```
+
+2. **Create + own the view and synced table in the target schema** — owner of `<catalog>`:
+   ```sql
+   GRANT USE CATALOG ON CATALOG `<catalog>` TO `<sp>`;
+   GRANT ALL PRIVILEGES ON SCHEMA `<catalog>`.`<schema>` TO `<sp>`;
+   ```
+3. **"Can Use" on the Lakebase project** (so the SP can create the synced table) — a project manager:
+   ```bash
+   databricks api patch /api/2.0/permissions/database-projects/<project> \
+     --json '{"access_control_list":[{"service_principal_name":"<sp>","permission_level":"CAN_USE"}]}'
+   ```
+
+The app grants the deployer and the `--admin-emails` users **Can Manage** on the job it creates. 
+
+All other Unity Catalog interactions (browsing assets, applying tags) run through the signed-in user's forwarded access token (OBO) and need no extra grants.
 
 #### Deployment script
 
@@ -97,9 +115,12 @@ The script prompts for everything it needs:
 
 - **Authentication** — choose environment variables (`DATABRICKS_HOST` + `DATABRICKS_TOKEN`) or an interactive `databricks auth login` profile.
 - **Catalog filter** (default empty) — comma-separated catalog names that scope the entire app, limiting the app to read classification proposals from `system.data_classification.results` only to the listed catalogs. It is useful if you are planning to release multiple distinct app instances to segregate admin visibility cones. Leave it blank (default) to include all results.
+- **Classification catalog / schema** — where the classification view and Lakebase synced table are hosted (defaults `data_classification_review_app` / `default`, created if missing). Press enter to keep the default.
+- **Assign permissions?** — whether to assign the grants in *Deployment prerequisites (permissions)* above during the deploy. Answer **No** if you lack the rights and an admin will apply them separately (equivalent to `--skip-permission-assignment`).
+- **Upgrading from 1.0.x?** — if you installed a version of the app matching with 1.0.x and you need to keep data already generated, this create a one-off job that migrates the app data kept in Postgres `public` (see *Upgrading from a version with tables in `public`*). Default **No**; equivalent to `--legacy-upgrade-job`.
 - **Admin emails** — comma-separated admin addresses.
 - **Warehouse** — pick from the numbered list of SQL warehouses in the workspace.
-- **Lakebase** — point to an existing Autoscaling instance (branch, database, host, endpoint name) or provision a brand-new one.
+- **Lakebase** — point to an existing Autoscaling instance or provision a brand-new one. For an existing instance you enter only the endpoint name (e.g. `projects/<project>/branches/production/endpoints/primary`, shown in the Lakebase UI) and the Postgres database name (default `databricks_postgres`); the script looks up the branch, host and database path.
 
 
 
@@ -116,10 +137,8 @@ export DATABRICKS_TOKEN=dapi...
   --admin-emails you@company.com \
   --warehouse-name "Shared Endpoint" \
   --catalog-filter my_catalog \
-  --lakebase-branch        "projects/<id>/branches/production" \
-  --lakebase-database      "projects/<id>/branches/production/databases/databricks-postgres" \
-  --lakebase-host          "ep-xxx.database.azuredatabricks.net" \
-  --lakebase-endpoint-name "projects/<id>/branches/production/endpoints/primary" \
+  --lakebase-endpoint-name "projects/<project>/branches/production/endpoints/primary" \
+  --lakebase-database      "my_database" \
   --yes
 ```
 
@@ -131,16 +150,23 @@ export DATABRICKS_TOKEN=dapi...
 | `--warehouse-id ID`                                                                          | alternative to `--warehouse-name`                       | SQL warehouse ID — skips listing all warehouses; takes precedence over `--warehouse-name`                                                                                |
 | `--catalog-filter LIST`                                                                      | no                                                      | Comma-separated catalog names to scope the app to (`CLASSIFICATION_CATALOG_FILTER`) — restricts which catalogs' proposals admins and stewards see. Default: all catalogs |
 | `--profile NAME`                                                                             | one auth method                                         | Pre-configured Databricks CLI profile; otherwise uses `DATABRICKS_HOST` + `DATABRICKS_TOKEN` env vars                                                                    |
-| `--lakebase-branch` / `--lakebase-database` / `--lakebase-host` / `--lakebase-endpoint-name` | all four, for an existing instance                      | Connection details for an existing Lakebase Autoscaling instance                                                                                                         |
-| `--new-lakebase`                                                                             | alternative to the four above                           | Provision a brand-new Lakebase instance                                                                                                                                  |
+| `--lakebase-endpoint-name NAME`                                                              | one Lakebase option, for an existing instance           | Read-write endpoint of an existing Lakebase Autoscaling instance (`projects/<project>/branches/<branch>/endpoints/<endpoint>`); the branch, host and database path are looked up from it |
+| `--new-lakebase`                                                                             | alternative to `--lakebase-endpoint-name`               | Provision a brand-new Lakebase instance                                                                                                                                  |
+| `--lakebase-database NAME`                                                                   | no (default `databricks_postgres`)                      | Postgres database on the endpoint's branch that the app uses (the name shown in the Lakebase UI, not the `…/databases/<id>` path)                                        |
+| `--classification-catalog NAME`                                                              | no (default `data_classification_review_app`)           | UC catalog for the classification view + synced table; created if missing                                                                                                |
+| `--classification-schema NAME`                                                               | no (default `default`)                                  | UC schema inside that catalog; created if missing                                                                                                                        |
+| `--classification-view NAME`                                                                 | no (default `classification_results_v`)                 | View with the QUALIFY dedup over `system.data_classification.results`                                                                                                     |
+| `--synced-table NAME`                                                                        | no (default `classification_results`)                   | Lakebase synced table the app reads proposals from                                                                                                                       |
+| `--sync-interval-hours N`                                                                    | no (default `24`)                                       | Sync cadence in hours; maps to the `classification_sync` job cron (`24` → daily). Values that divide evenly into 24 (1,2,3,4,6,8,12,24) give a uniform cadence; other values are approximate. |
+| `--skip-permission-assignment`                                                               | no                                                      | Skip assigning the grants in *Deployment prerequisites (permissions)* (for when you lack the rights and they're applied separately). The deploy still starts the app, which provisions the view, synced table and sync job, assuming those grants are in place. |
+| `--legacy-upgrade-job`                                                                       | no                                                      | Also create the manual job *"Data Classification Review App - Migrate legacy schema from version 1.0.x"*, which copies the app data a 1.0.x install kept in Postgres `public` (prefilled from this deploy; runs as you). A later deploy without it removes the job. |
 | `-y`, `--yes`                                                                                | yes                                                     | Non-interactive mode; fail fast if any required value is missing                                                                                                         |
 
 
 Run `./scripts/deploy.sh --help` for the full, authoritative flag list.
 
+
 ### Asset Permissions
-
-
 
 #### App Admins
 
@@ -205,9 +231,9 @@ Both `scripts/deploy.sh` and `scripts/install.sh` can optionally install a demo 
 
 There are three mutually-exclusive demo modes:
 
-- `**single-catalog**` — creates demo schemas/tables with synthetic data inside one catalog you specify (created automatically if it doesn't already exist), and optionally enables **real** Unity Catalog data classification on it.
-- `**multi-catalog**` — creates the 5 fixed `dc_demo_*` catalogs populated with synthetic data, and optionally enables **real** Unity Catalog data classification on them. For both catalog modes, the app keeps reading `system.data_classification.results`; the demo catalogs appear once classification completes.
-- `**mock-results**` — skips real classification. It generates a results table you specify (creating the schema if missing), populates it from a committed snapshot, and points the app at it via `CLASSIFICATION_RESULTS_TABLE`. The app service principal is granted `SELECT` on that table automatically.
+- **`single-catalog`** — creates demo schemas/tables with synthetic data inside one catalog you specify (created automatically if it doesn't already exist), and optionally enables **real** Unity Catalog data classification on it.
+- **`multi-catalog`** — creates the 5 fixed `dc_demo_*` catalogs populated with synthetic data, and optionally enables **real** Unity Catalog data classification on them. For both catalog modes, the app keeps reading `system.data_classification.results`; the demo catalogs appear once classification completes.
+- **`mock-results`** — skips real classification. It generates a results table you specify (creating the schema if missing), populates it from a committed snapshot, and points the app at it via `CLASSIFICATION_RESULTS_TABLE`. The app service principal is granted `SELECT` on that table automatically.
 
 
 
@@ -238,7 +264,7 @@ In the interactive path the script also prompts for the demo mode and its mode-s
   --yes
 ```
 
-Swap `--demo mock-results --demo-results-table ...` for `--demo catalogs` to provision the demo catalogs with real classification instead. The same flags work with `./scripts/deploy.sh` when you already have pre-built artifacts.
+Swap `--demo mock-results --demo-results-table ...` for `--demo multi-catalog --demo-enable-classification` (or `--demo single-catalog --demo-catalog <name> --demo-enable-classification`) to provision demo catalogs with real classification instead. The same flags work with `./scripts/deploy.sh` when you already have pre-built artifacts.
 
 ## Project Structure
 
@@ -250,14 +276,17 @@ data-classification-review-app/
 │       │   ├── app.py              # FastAPI entrypoint
 │       │   ├── router.py           # Route registration
 │       │   ├── models.py           # Pydantic request/response models
-│       │   ├── routes/             # proposals, decisions, apply_tags, tables, stewards, tags, me
+│       │   ├── routes/             # proposals, decisions, apply_tags, tables, stewards, tags, me, classification_sync
 │       │   ├── clients/            # warehouse SQL client, UC SDK client
 │       │   ├── core/               # Config, auth headers, SCIM, DI dependencies
 │       │   ├── db/
 │       │   │   ├── connection.py   # PGLite (local) / Lakebase (production)
 │       │   │   ├── lifespan.py     # Startup/shutdown hooks
+│       │   │   ├── classification_provision.py  # Startup (as SP): view → synced table → refresh job
+│       │   │   ├── classification_job.py        # classification_sync job (single pipeline task)
+│       │   │   ├── read_model.py   # Paginated/aggregated SQL reads over the synced table
 │       │   │   ├── seed.py         # Mock data seeding (USE_MOCK_DATA=true only)
-│       │   │   └── migrations/     # SQL migration files (001–004)
+│       │   │   └── migrations/     # SQL migration files (001–005)
 │       │   └── mock/               # Static mock data for offline development
 │       ├── _metadata.pyi           # Type stub — concrete file generated at build time
 │       └── _version.pyi            # Type stub — concrete file generated at build time
@@ -272,12 +301,14 @@ data-classification-review-app/
 ├── demo/
 │   ├── notebooks/                  # Demo job notebooks: single-catalog, multi-catalog, mock-results
 │   └── data/                       # Committed classification_results.parquet snapshot (mock-results demo)
+├── upgrade/                        # Optional admin upgrade notebook: copy app data from `public`
+├── releases/                       # Release notes per version (ReleaseNotes_V<x.y.z>.md)
 ├── docs/
 │   └── images/                     # README screenshots (Admin/Steward overview)
 ├── scripts/
 │   ├── deploy.sh                   # Deploy from pre-built artifacts
 │   └── install.sh                  # Build from source, then deploy
-├── tests/                          # Pytest backend tests
+├── tests/                          # Pytest tests (backend, upgrade helper)
 ├── app.yml                         # Databricks App manifest
 ├── databricks.yml                  # Databricks Asset Bundle configuration
 └── pyproject.toml                  # Python project metadata
@@ -292,7 +323,7 @@ The app is deployed as a **Databricks App** backed by **Lakebase**:
 - **Frontend**: React 18 + TypeScript, TanStack Query, Zustand, shadcn/ui + Tailwind CSS
 - **Backend**: Python + FastAPI, Databricks SDK, APX framework
 - **Database**: Lakebase Autoscaling (production)
-- **Data source**: `system.data_classification.results` (Unity Catalog system table) and Unity Catalog APIs
+- **Data source**: `system.data_classification.results` (Unity Catalog system table), read through an SP-owned deduplicating view into a Lakebase synced table that the `classification_sync` job refreshes; Unity Catalog APIs for metadata and tag application
 - **Auth**: Databricks Apps OAuth
 - **Deploy**: Databricks Asset Bundles (`databricks.yml`) + APX (`app.yml`)
 

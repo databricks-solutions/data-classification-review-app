@@ -1,24 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
   Icon, Btn, Avatar, TagPill, StatusPill, ConfidencePill, FilterChip,
 } from '../components'
 import { api } from '../store/api'
-import type { Principal } from '../store/types'
+import { useDebounced } from '../store/useDebounced'
+import type { Principal, ProposalQuery } from '../store/types'
 
 const GRID_COLUMNS = '0.9fr 1.1fr 1.3fr 1.1fr 1.1fr 80px 1.1fr 110px 90px'
 
 export function AdminAssets() {
-  const { data: proposals = [], isLoading, isError } = useQuery({
-    queryKey: ['proposals'],
-    queryFn: () => api.getProposals(),
-  })
-
-  const { data: stewards = [] } = useQuery<Principal[]>({
-    queryKey: ['stewards'],
-    queryFn: api.getStewards,
-  })
-
   const [searchText, setSearchText] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [catalogFilter, setCatalogFilter] = useState('')
@@ -28,37 +19,50 @@ export function AdminAssets() {
   const [confidenceFilter, setConfidenceFilter] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
+  const search = useDebounced(searchText.trim())
 
   // Cascade: reset schema when catalog changes
   useEffect(() => { setSchemaFilter('') }, [catalogFilter])
 
   // Reset to first page whenever filters or page size change
   useEffect(() => { setPage(1) }, [
-    searchText, statusFilter, catalogFilter, schemaFilter,
+    search, statusFilter, catalogFilter, schemaFilter,
     tagFilter, stewardFilter, confidenceFilter, pageSize,
   ])
 
-  const catalogs = useMemo(
-    () => [...new Set(proposals.map(p => p.catalog))],
-    [proposals],
-  )
+  const query: ProposalQuery = {
+    search: search || undefined,
+    status: statusFilter || undefined,
+    catalog: catalogFilter || undefined,
+    schema: schemaFilter || undefined,
+    tag: tagFilter || undefined,
+    steward: stewardFilter || undefined,
+    confidence: confidenceFilter || undefined,
+    page, pageSize,
+  }
+  const { data: pageData, isLoading, isError, error } = useQuery({
+    queryKey: ['proposals', 'page', query],
+    queryFn: () => api.listProposals(query),
+    placeholderData: keepPreviousData,
+  })
+  const { data: facets } = useQuery({
+    queryKey: ['proposals', 'facets', catalogFilter, ''],
+    queryFn: () => api.getProposalFacets({ catalog: catalogFilter || undefined }),
+    placeholderData: keepPreviousData,
+  })
+  const { data: stats } = useQuery({
+    queryKey: ['proposals', 'stats', ''],
+    queryFn: () => api.getOverviewStats(),
+  })
+  const { data: stewards = [] } = useQuery<Principal[]>({
+    queryKey: ['stewards'],
+    queryFn: api.getStewards,
+  })
 
-  const schemas = useMemo(() => {
-    const scope = catalogFilter
-      ? proposals.filter(p => p.catalog === catalogFilter)
-      : proposals
-    return [...new Set(scope.map(p => p.schemaName))]
-  }, [proposals, catalogFilter])
-
-  const tagOpts = useMemo(
-    () => [...new Set(proposals.map(p => p.classTag))],
-    [proposals],
-  )
-
-  const stewardOpts = useMemo(
-    () => [...new Set(proposals.map(p => p.owner))],
-    [proposals],
-  )
+  const catalogs = facets?.catalogs ?? []
+  const schemas = facets?.schemas ?? []
+  const tagOpts = facets?.tags ?? []
+  const stewardOpts = facets?.stewards ?? []
 
   const stewardLookup = useMemo(() => {
     const m = new Map<string, Principal>()
@@ -66,32 +70,21 @@ export function AdminAssets() {
     return m
   }, [stewards])
 
-  const filtered = useMemo(() => {
-    const q = searchText.toLowerCase()
-    return proposals.filter(p => {
-      if (q) {
-        const haystack = `${p.catalog}.${p.schemaName}.${p.table}.${p.column} ${p.classTag}`.toLowerCase()
-        if (!haystack.includes(q)) return false
-      }
-      if (statusFilter && p.status !== statusFilter) return false
-      if (catalogFilter && p.catalog !== catalogFilter) return false
-      if (schemaFilter && p.schemaName !== schemaFilter) return false
-      if (tagFilter && (p.modifiedTag || p.classTag) !== tagFilter) return false
-      if (stewardFilter && p.owner !== stewardFilter) return false
-      if (confidenceFilter && confidenceFilter !== 'NONE' && p.confidence !== confidenceFilter) return false
-      if (confidenceFilter === 'NONE' && p.confidence !== null) return false
-      return true
-    })
-  }, [
-    proposals, searchText, statusFilter, catalogFilter,
-    schemaFilter, tagFilter, stewardFilter, confidenceFilter,
-  ])
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
-  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const rows = pageData?.items ?? []
+  const filteredTotal = pageData?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(filteredTotal / pageSize))
 
   if (isLoading) return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-sans)', color: 'var(--db-gray-text)' }}>Loading…</div>
-  if (isError) return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-sans)', color: 'var(--db-lava-600)' }}>Failed to load data. Please refresh.</div>
+  if (isError) {
+    const is503 = (error as any)?.status === 503
+    if (is503) return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, fontFamily: 'var(--font-sans)' }}>
+        <div style={{ fontSize: 15, fontWeight: 500, color: 'var(--db-navy-800)' }}>Classification sync pending</div>
+        <div style={{ fontSize: 13, color: 'var(--db-gray-text)', maxWidth: 360, textAlign: 'center' }}>No synced data yet. Go to the Overview tab and click Refresh to trigger the first sync.</div>
+      </div>
+    )
+    return <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-sans)', color: 'var(--db-lava-600)' }}>Failed to load data. Please refresh.</div>
+  }
 
   return (
     <div style={{
@@ -119,7 +112,7 @@ export function AdminAssets() {
               All classification proposals
             </h1>
             <div style={{ fontSize: 13, color: 'var(--db-gray-text)', marginTop: 6 }}>
-              {filtered.length} of {proposals.length} columns shown
+              {filteredTotal} of {stats?.total ?? filteredTotal} columns shown
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -220,7 +213,7 @@ export function AdminAssets() {
 
       {/* Table */}
       <div style={{ flex: 1, overflow: 'auto', padding: '0 32px 32px' }}>
-        {filtered.length === 0 ? (
+        {filteredTotal === 0 ? (
           <div style={{
             background: '#fff', border: '1px dashed var(--db-gray-lines)',
             borderRadius: 8, padding: 40, textAlign: 'center',
@@ -251,7 +244,7 @@ export function AdminAssets() {
               <div>Status</div>
               <div>Decided</div>
             </div>
-            {paginated.map(p => {
+            {rows.map(p => {
               const s = stewardLookup.get(p.owner)
               const decided = p.decidedAt ? p.decidedAt.slice(0, 10) : '—'
               return (
@@ -325,7 +318,7 @@ export function AdminAssets() {
         )}
 
         {/* Pagination bar */}
-        {filtered.length > 0 && (
+        {filteredTotal > 0 && (
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '12px 0', gap: 12, flexWrap: 'wrap',
@@ -349,7 +342,7 @@ export function AdminAssets() {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontSize: 12, color: 'var(--db-gray-text)', fontFamily: 'var(--font-sans)' }}>
-                {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, filtered.length)} of {filtered.length}
+                {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, filteredTotal)} of {filteredTotal}
               </span>
               <Btn variant="ghost" size="sm" onClick={() => setPage(p => p - 1)} disabled={page === 1} title="Previous page">
                 <Icon name="arrowLeft" size={13} />

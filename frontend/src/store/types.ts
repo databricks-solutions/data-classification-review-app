@@ -65,8 +65,19 @@ export interface PrincipalSearchResult {
   members?: number
 }
 
+// Per-kind outcome of a principal search. 'exact_only' (users): the workspace throttles
+// SCIM substring search, so only a full email address finds a user.
+export type PrincipalSearchStatus = 'ok' | 'exact_only' | 'error' | 'skipped'
+
+export interface PrincipalSearchResponse {
+  results: PrincipalSearchResult[]
+  usersStatus: PrincipalSearchStatus
+  groupsStatus: PrincipalSearchStatus
+}
+
 export interface Proposal {
-  key: string                      // catalog.schema.table.column
+  key: string                      // unique per proposal (column + tag); opaque
+  columnKey: string                // catalog.schema.table.column
   catalog: string
   schemaName: string
   table: string
@@ -102,6 +113,7 @@ export interface TableSummary {
   modified: number
   highConf: number
   lowConf: number
+  tags: string[]
   proposals: Proposal[]
 }
 
@@ -173,6 +185,12 @@ export interface StewardAssignment {
   tableName?: string
 }
 
+export interface ApplyTagItem {
+  columnKey: string
+  classTag: string
+  userAdded?: boolean
+}
+
 export interface ApplyTagsResult {
   applied: number
   skipped: number
@@ -209,4 +227,79 @@ export interface MeResponse {
   isAdmin: boolean
   isMockMode: boolean
   allUsers?: Principal[]           // only present in mock mode
+}
+
+export type ProvisioningState =
+  | 'pending' | 'running' | 'ready' | 'failed' | 'not_configured' | 'disabled'
+
+export interface ProvisioningStatus {
+  state: ProvisioningState
+  step: 'view' | 'synced_table' | 'pipeline' | 'job' | null
+  error: string | null
+  hint: string | null
+  updatedAt: string | null
+  servicePrincipal: string | null
+}
+
+export interface SyncStatus {
+  state: string | null
+  lastSyncEnd: string | null
+  running: boolean
+  provisioning: ProvisioningStatus
+}
+
+export interface ProposalPage {
+  items: Proposal[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+export interface ProposalQuery {
+  catalog?: string
+  schema?: string
+  table?: string
+  tag?: string
+  status?: string
+  steward?: string
+  search?: string
+  confidence?: string
+  page?: number
+  pageSize?: number
+}
+
+export interface StatusCounts {
+  total: number
+  pending: number
+  approved: number
+  rejected: number
+  modified: number
+  applied: number
+}
+
+export interface CatalogStats extends StatusCounts { catalog: string; tables: number }
+export interface TagStats extends StatusCounts { tag: string }
+export interface OwnerStats extends StatusCounts { owner: string }
+
+export interface OverviewStats extends StatusCounts {
+  approvalRate: number
+  tableCount: number
+  byCatalog: CatalogStats[]
+  byTag: TagStats[]
+  byOwner: OwnerStats[]
+}
+
+export interface ProposalFacets {
+  catalogs: string[]
+  schemas: string[]
+  tables: string[]
+  tags: string[]
+  stewards: string[]
+}
+
+export interface Coverage {
+  tableCount: number
+  proposalCount: number
+  pending: number
+  tables: string[]
 }

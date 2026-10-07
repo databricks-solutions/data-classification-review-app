@@ -19,7 +19,7 @@ interface AppState {
   isMockMode: boolean
   allMockUsers: Principal[]
 
-  localDecisions: Record<string, DecisionPatch>   // columnKey → patch
+  localDecisions: Record<string, DecisionPatch>   // proposal key → patch
   userProposed: Record<string, string[]>           // columnKey → tag[]
 
   setIdentity: (user: Principal, isMockMode: boolean, allUsers?: Principal[]) => void
